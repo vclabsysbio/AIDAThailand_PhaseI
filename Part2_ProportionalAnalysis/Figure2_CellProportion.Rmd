@@ -1,0 +1,334 @@
+---
+title: "Part2_Cell_type_proportion_20251101"
+author: "BZ"
+date: "2025-11-01"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(Seurat)
+library(stringr)
+library(ggpubr)
+library(tidyr)
+library(rstatix)
+library(janitor)
+library(patchwork)
+library(readr)
+```
+
+#1. Updated processed data and added metadata
+```{r}
+#Read processed data of integrated object and cell annotation version 20240711
+#AIDA
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC <- readRDS("/home/benjamaporn/AIDA/processed_KH/Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC.rds")
+AIDA_processed_data_CellxGene2024 <- read.csv("/home/benjamaporn/AIDA/processed_KH/AIDA_processed_data_CellxGene2024.tsv")
+AIDA_processed_data_CellxGene2024_umap <- read.csv("/home/benjamaporn/AIDA/processed_KH/AIDA_processed_data_CellxGene2024_umap.tsv") 
+
+#Add cell annotation in metadata with mached cell barcode from CellxGene2024
+AIDA_processed_data_CellxGene2024_select <- select(AIDA_processed_data_CellxGene2024, index, author_cell_type) %>% rename("barcode_name" = "index")
+rownames(AIDA_processed_data_CellxGene2024_select) <- AIDA_processed_data_CellxGene2024_select$barcode_name
+AIDA_processed_data_CellxGene2024_select$barcode_name <- NULL
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024 <- AddMetaData(
+  object = Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC,
+  metadata = AIDA_processed_data_CellxGene2024_select,
+  col.name = 'Annotation_Level3_2024')
+
+#Add UMAP embedding
+AIDA_processed_data_CellxGene2024_umap_name <- AIDA_processed_data_CellxGene2024_umap %>% rename("barcode_name" = "index", "UMAP_1" = "X0", "UMAP_2" = "X1")
+#transfer barcode name to rownames
+rownames(AIDA_processed_data_CellxGene2024_umap_name) <- AIDA_processed_data_CellxGene2024_umap_name$barcode_name
+AIDA_processed_data_CellxGene2024_umap_name$barcode_name <- NULL
+#Cell embedding for UMAP 
+AIDA_processed_data_CellxGene2024_umap_name_mtx <- as.matrix(AIDA_processed_data_CellxGene2024_umap_name)
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024[["umap"]] <- CreateDimReducObject(embeddings = AIDA_processed_data_CellxGene2024_umap_name_mtx, key = "UMAP_", assay = DefaultAssay(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024))
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024
+
+
+#Add major cells
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024_majorcell2 <- Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024@meta.data %>% mutate(cell_types = case_when(Annotation_Level3_2024 == "CD14+_Monocyte" ~ "Monocyte",
+          Annotation_Level3_2024 == "CD16+_Monocyte" ~ "Monocyte",
+          Annotation_Level3_2024 == "pDC" ~ "Dendritic cell",
+          Annotation_Level3_2024 == "DC_SIGLEC6hi" ~ "Dendritic cell",
+          Annotation_Level3_2024 == "cDC1" ~ "cDC",
+          Annotation_Level3_2024 == "cDC2" ~ "cDC",
+          Annotation_Level3_2024 == "Platelet" ~ "Platelet",
+          Annotation_Level3_2024 == "ILC" ~ "ILC",
+          Annotation_Level3_2024 == "B" ~ "B",
+          Annotation_Level3_2024 == "atypical_B" ~ "B",
+          Annotation_Level3_2024 == "memory_B" ~ "B",
+          Annotation_Level3_2024 == "memory_B_IGHMhi" ~ "B",
+          Annotation_Level3_2024 == "naive_B" ~ "B",
+          Annotation_Level3_2024 == "memory_B_IGHMlo" ~ "B",
+          Annotation_Level3_2024 == "Plasma_Cell" ~ "Plasma_Cell",
+          Annotation_Level3_2024 == "NK" ~ "NK",
+          Annotation_Level3_2024 == "CD16+_NK" ~ "NK",
+          Annotation_Level3_2024 == "CD56+_NK" ~ "NK",
+          Annotation_Level3_2024 == "T" ~ "T",
+          Annotation_Level3_2024 == "CD4+_T" ~ "T",
+          Annotation_Level3_2024 == "CD4+_T_cm" ~ "T",
+          Annotation_Level3_2024 == "CD4+_T_em" ~ "T",
+          Annotation_Level3_2024 == "CD4+_T_naive" ~ "T",
+          Annotation_Level3_2024 == "Treg" ~ "T",
+          Annotation_Level3_2024 == "CD4+_T_cyt" ~ "T",
+          Annotation_Level3_2024 == "CD8+_T" ~ "T",
+          Annotation_Level3_2024 == "CD8+_T_GZMBhi" ~ "T",
+          Annotation_Level3_2024 == "MAIT" ~ "T",
+          Annotation_Level3_2024 == "CD8+_T_naive" ~ "T",
+          Annotation_Level3_2024 == "CD8+_T_GZMKhi" ~ "T",
+          Annotation_Level3_2024 == "gdT_GZMKhi" ~ "T",
+          Annotation_Level3_2024 == "gdT_GZMBhi" ~ "T",
+          Annotation_Level3_2024 == "dnT" ~ "T",
+          Annotation_Level3_2024 == "Myeloid" ~ "Myeloid_unknown",
+          Annotation_Level3_2024 == "CD34_HSPC" ~ "CD34_HSPC"                                                                                            )) 
+#Add celltypes majorcell2 in metadata of seurat
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024_celltype_majorcell2 <- AddMetaData(
+  object = Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024,
+  metadata = Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024_majorcell2$cell_types,
+  col.name = 'Major_cells')
+#checked
+DimPlot(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024_celltype_majorcell2, reduction = "umap", group.by = "Major_cells", label = TRUE, repel = TRUE, raster=FALSE) + labs(title = "Major_cells")
+
+saveRDS(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024_celltype_majorcell2, ".../Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024_celltype_majorcell2.rds")
+
+
+#Update the current cell annotation 
+AIDA_DataFreeze_v2_AnnotationLevels_Shared_July2024 <- read.table("/home/benjamaporn/AIDA/GEX/Updated20240711/AIDA_DataFreeze_v2_AnnotationLevels_Shared_July2024.txt")
+colnames(AIDA_DataFreeze_v2_AnnotationLevels_Shared_July2024) <- AIDA_DataFreeze_v2_AnnotationLevels_Shared_July2024[1,]
+AIDA_DataFreeze_v2_AnnotationLevels_Shared_July2024 <- AIDA_DataFreeze_v2_AnnotationLevels_Shared_July2024[-1,]
+rownames(AIDA_DataFreeze_v2_AnnotationLevels_Shared_July2024) <- AIDA_DataFreeze_v2_AnnotationLevels_Shared_July2024[,1]
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024 <- AddMetaData(
+  object = Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_level3_2024_celltype_majorcell2,
+  metadata = AIDA_DataFreeze_v2_AnnotationLevels_Shared_July2024)
+#checked
+DimPlot(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024, reduction = "umap", group.by = "Author_Annotation", label = TRUE, repel = TRUE, raster=FALSE) + labs(title = "Author_Annotation")
+saveRDS(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024, ".../Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024.rds")
+
+#Genetics 
+#Admixture 
+#AIDA with ref
+AIDA_merged_AADR_imputed_admixture_k3 <- read_tsv("/home/benjamaporn/AIDA/Analysis/Analysis202510/AIDA_Genomics_Admixture_metadata/AIDA_merged_AADR_hg38_autosome_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_onlyAIDA_select.tsv") 
+AIDA_merged_AADR_imputed_admixture_k3_rename <- AIDA_merged_AADR_imputed_admixture_k3 %>% 
+  rename("Genotyping_ID"="ind") %>% 
+  rename("Red_ref"="EAS") %>% 
+  rename("Blue_ref"="MSEA") %>% 
+  rename("Orange_ref"="SAS")
+#AIDA from GSA
+AIDA_GSA_admixture_k3 <- read_tsv("/home/benjamaporn/AIDA/Analysis/Analysis202510/AIDA_Genomics_Admixture_metadata/AIDA_vQCed_autosome_ref_matched_unrelatedSamples_noLONZA_pop_ordered_k3.tsv")
+AIDA_GSA_admixture_k3_rename <- AIDA_GSA_admixture_k3 %>% 
+  rename("Genotyping_ID"="ind") %>%
+  rename("Red_GSA"="EAS") %>% 
+  rename("Blue_GSA"="MSEA") %>% 
+  rename("Orange_GSA"="SAS")
+#Genetic facor
+AIDA_admix_ref_GSA <- merge(AIDA_merged_AADR_imputed_admixture_k3_rename, AIDA_GSA_admixture_k3_rename, by = "Genotyping_ID")
+AIDA_admix_ref_GSA_select <- AIDA_admix_ref_GSA %>% select(Genotyping_ID, Country.x, Red_ref, Blue_ref, Orange_ref, Red_GSA, Blue_GSA, Orange_GSA)
+
+#add genetic factors in Seurat (all cell types)
+AIDA_admix_ref_GSA_metadata <- merge(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024@meta.data, AIDA_admix_ref_GSA_select, by="Genotyping_ID")
+rownames(AIDA_admix_ref_GSA_metadata) <- AIDA_admix_ref_GSA_metadata$barcode_name
+
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA <- AddMetaData(
+  object = Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024,
+  metadata = AIDA_admix_ref_GSA_metadata
+)
+#checked
+DimPlot(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA, reduction = "umap", group.by = "Author_Annotation", label = F, repel = FALSE, raster=FALSE)
+
+#Only unrelated samples
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples <- subset(x = Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA, subset = Genotyping_ID %in% unique(AIDA_admix_ref_GSA_metadata$Genotyping_ID))
+saveRDS(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples, file = ".../Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples.rds")
+```
+
+#2. UMAP Visualization
+```{r}
+#Read Files
+#AIDA
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples <- readRDS("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples.rds")
+
+Author_Annotation_col_dict <- c("CD34_HSPC"="#8C564B",  "Myeloid_unknown"="#01579B", "CD14+_Monocyte"="#CC5500", "CD16+_Monocyte"="#FFCA99",  "DC_SIGLEC6hi"="#006666", "cDC1"="#00FFFF", "cDC2"="#99FFFF", "pDC"="#30BCAD", "Platelet"="#9467BD", "NK_unknown"="#FFFFCC", "CD16+_NK"="#FFC44C",  "CD56+_NK"="#FF8000",  "gdT_GZMKhi"="#827717", "gdT_GZMBhi"="#AFB42B", "dnT"="#CCE283", "CD8+_T_naive"="#AED581", "CD8+_T_unknown"="#8BC34A","CD8+_T_GZMBhi"="#689F38", "CD8+_T_GZMKhi"="#33691E",  "MAIT"="#C1C4C3", "T_unknown"="#E0F2F1", "CD4+_T_unknown"="#E8F5E9", "CD4+_T_naive"="#2E7D32", "CD4+_T_cm"="#66BB6A", "CD4+_T_em"="#A5D6A7",  "CD4+_T_cyt"="#43A047", "Treg"="#00796B", "B_unknown"="#B71C1C", "naive_B"="#D32F2F", "atypical_B"="#F44336", "memory_B_unknown"="#EC407A", "memory_B_IGHMhi"="#F48FB1", "memory_B_IGHMlo"="#FCE4EC", "Plasma_Cell"="#880E4F", "ILC"="#2CA02C")
+
+#Fig. 2A
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples_TH <- subset(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples, subset = Country == "TH")
+
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples_TH_Author_Annotation_umap <- DimPlot(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples_TH, reduction = "umap", group.by = "Author_Annotation", label = TRUE, repel = TRUE, raster=FALSE, label.size = 2.5, cols = Author_Annotation_col_dict) + labs(title = "", caption = "Author Annotation: TH AIDA (n = 125,908 cells)")+ 
+NoLegend()
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples_TH_Author_Annotation_umap
+```
+
+#3. Proportional analysis
+#Sample and Cell type QC
+```{r}
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples <- Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples@meta.data
+
+#Proportion (combine both 2 libraries)
+#No IN and cell < 800cells/donor
+DCP_ID_more800_ID <- Allcelltype_AIDA_admix_ref_GSA_unrelated_samples %>%
+  group_by(DCP_ID) %>% 
+  summarise(n_cell = n_distinct(barcode_name)) %>% 
+  filter(n_cell>800)
+
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc <- filter(Allcelltype_AIDA_admix_ref_GSA_unrelated_samples, DCP_ID %in% DCP_ID_more800_ID$DCP_ID) %>%
+  group_by(DCP_ID, Author_Annotation) %>% 
+  summarise(n_cell = n_distinct(barcode_name), .groups = 'drop') %>%
+  group_by(DCP_ID) %>% 
+  mutate(perc = (n_cell / sum(n_cell))) %>% 
+  arrange(perc) %>%
+  mutate(labels = scales::percent(perc)) %>%
+  mutate(log10perc = log10(perc))
+
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_metadata <- select(Allcelltype_AIDA_admix_ref_GSA_unrelated_samples, DCP_ID, Country, BMI, Age, Sex, Ethnicity, Library, Red_ref, Blue_ref, Orange_ref, Red_GSA, Blue_GSA, Orange_GSA) %>%
+mutate(Sampling_time = case_when(startsWith(Library, "TH_MAH_B001") ~ "B001+B002",
+                                   startsWith(Library, "TH_MAH_B002") ~ "B001+B002",
+                                   startsWith(Library, "TH_MAH_B003") ~ "B003+B004",
+                                   startsWith(Library, "TH_MAH_B004") ~ "B003+B004",
+                                   ))
+
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata <- merge(Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_metadata, Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc, by="DCP_ID") %>%
+distinct(DCP_ID, Author_Annotation, .keep_all = TRUE)
+
+#No IN
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN <- filter(Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata, Country != "IN")
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN_mean <- Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN %>% group_by(Author_Annotation) %>% summarise(mean_cell = mean(n_cell))
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN_mean_more10 <- unique(filter(Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN_mean, mean_cell > 10)$Author_Annotation)
+
+#Cell subtype only n_cell > 6 cells per donor on median 
+#No IN
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN_median <- Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN %>% group_by(Author_Annotation) %>% summarise(median_cell = median(n_cell))
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN_median_more6 <- unique(filter(Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN_median, median_cell > 6)$Author_Annotation)
+```
+
+#Regression analysis 
+```{r}
+#Regression analysis
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_THvsAll_list <- list()
+THvsAll_Author_Annotation_lm_list <- list()
+THvsAll_Author_Annotation_cof_list <- list()
+THvsAll_Author_Annotation_cof_rename <- list()
+THvsAll_Author_Annotation_cof_p <- list()
+THvsAll_Author_Annotation_cof_p_rename <- list()
+THvsAll_Author_Annotation_cof_R2 <- list()
+THvsAll_Author_Annotation_cof_R2_rename <- list()
+
+for (i in Author_Annotation_celltype) {
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_THvsAll_list[[i]] <-  filter(Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN_cohort, Author_Annotation == i)
+THvsAll_Author_Annotation_lm_list[[i]] <- lm(log10perc ~ cohort + Age + Sex + cohort:Age + cohort:Sex, data = Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_THvsAll_list[[i]])
+THvsAll_Author_Annotation_cof_list[[i]] <- as.data.frame(THvsAll_Author_Annotation_lm_list[[i]][["coefficients"]])
+THvsAll_Author_Annotation_cof_rename[[i]] <- setNames(THvsAll_Author_Annotation_cof_list[[i]], i)
+THvsAll_Author_Annotation_cof_p[[i]] <- as.data.frame(summary(THvsAll_Author_Annotation_lm_list[[i]])$coefficients[,4])
+THvsAll_Author_Annotation_cof_p_rename[[i]] <- setNames(THvsAll_Author_Annotation_cof_p[[i]], i)
+THvsAll_Author_Annotation_cof_R2[[i]] <- as.data.frame(summary(THvsAll_Author_Annotation_lm_list[[i]])$adj.r.squared)
+THvsAll_Author_Annotation_cof_R2_rename[[i]] <- setNames(THvsAll_Author_Annotation_cof_R2[[i]], i)
+}
+
+#Effect size
+THvsAll_Author_Annotation_lm_cof_df <- data.frame(THvsAll_Author_Annotation_cof_rename, check.names = FALSE)
+rownames(THvsAll_Author_Annotation_lm_cof_df) <- c("Intercept", "Thai v Other AIDA", "Age", "XY","Thai_AIDA:Age", "Thai_AIDA:XY")
+THvsAll_Author_Annotation_lm_cof_mtx <- as.matrix(THvsAll_Author_Annotation_lm_cof_df)
+THvsAll_Author_Annotation_lm_cof_mtx <- THvsAll_Author_Annotation_lm_cof_mtx[rownames(THvsAll_Author_Annotation_lm_cof_mtx)!="Intercept",]
+#P-value
+THvsAll_Author_Annotation_cof_p_rename_df <- data.frame(THvsAll_Author_Annotation_cof_p_rename, check.names = FALSE)
+rownames(THvsAll_Author_Annotation_cof_p_rename_df) <- c("Intercept", "Thai v Other AIDA", "Age", "XY","Thai_AIDA:Age", "Thai_AIDA:XY")
+THvsAll_Author_Annotation_cof_p_rename_df_mtx <- as.matrix(THvsAll_Author_Annotation_cof_p_rename_df)
+THvsAll_Author_Annotation_cof_p_rename_df_mtx <- THvsAll_Author_Annotation_cof_p_rename_df_mtx[rownames(THvsAll_Author_Annotation_cof_p_rename_df_mtx)!="Intercept",]
+#adj R-squared 
+THvsAll_Author_Annotation_cof_R2_rename_df <- t(data.frame(THvsAll_Author_Annotation_cof_R2_rename))
+```
+
+```{r fig.height=4, fig.width=10}
+library(ComplexHeatmap)
+library(colorRamp2)
+THvsAll_col_fun_Author_Annotation = colorRamp2(c(-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.5), c("#88337A", "#CB6CA2",  "#E594B6", "white", "#74C2C5","#4CB8BB", "#00AEB2", "#00A5A8", "#009B9F"))
+
+#THvsALL
+THvsAll_Author_Annotation_lm_cof_mtx_heatmap <- Heatmap(THvsAll_Author_Annotation_lm_cof_mtx, cluster_rows = FALSE, cluster_columns = FALSE, heatmap_legend_param = list(title = "Coefficient Level", legend_direction = "vertical", title_gp = gpar(fontsize = 12), legend_width = unit(6, "cm"), title_position = "lefttop-rot", legend_height = unit(6, "cm")), border_gp = gpar(col = "black", lty = 1, lwd = 2), top_annotation = HeatmapAnnotation(empty = anno_empty(border = FALSE), Ethnicity = anno_block(labels = "Self-reported ethnicity among AIDA cohorts", gp = gpar(fill = "white"), height = unit(1, "cm"), labels_gp = gpar(col = "black", fontface = "bold", fontsize = 12))), col=THvsAll_col_fun_Author_Annotation, cell_fun = function(j, i, x, y, w, h, fill) {
+    if (THvsAll_Author_Annotation_cof_p_rename_df_mtx[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if (THvsAll_Author_Annotation_cof_p_rename_df_mtx[i, j] < 0.01) {
+        grid.text("**", x, y)
+    }  else if (THvsAll_Author_Annotation_cof_p_rename_df_mtx[i, j] < 0.05) {
+       grid.text("*", x, y)
+    }
+}
+)
+THvsAll_Author_Annotation_lm_cof_mtx_heatmap
+```
+
+#Thai vs Non-Thai AIDA using optimized model
+```{r}
+Author_Annotation_celltype = c("Myeloid_unknown", "CD14+_Monocyte", "CD16+_Monocyte", "cDC2", "Platelet", "NK_unknown", "CD16+_NK", "CD56+_NK", "T_unknown", "CD4+_T_unknown", "CD4+_T_naive", "CD4+_T_cm",  "CD4+_T_cyt", "CD4+_T_em", "CD8+_T_unknown", "CD8+_T_naive", "CD8+_T_GZMBhi", "CD8+_T_GZMKhi", "MAIT",   "gdT_GZMBhi", "gdT_GZMKhi",  "Treg", "naive_B", "memory_B_IGHMlo", "memory_B_IGHMhi")
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN_cohort <- Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN %>%
+mutate(cohort = case_when(startsWith(DCP_ID, "TH") ~ "Thai_AIDA",
+                                  TRUE ~ "Other_AIDA"
+                                   ))
+#Regression analysis (without LONZA)
+#Optimized model : remove Thai_AIDA:age
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_THvsAll_optimized_list <- list()
+THvsAll_optimized_Author_Annotation_lm_list <- list()
+THvsAll_optimized_Author_Annotation_cof_list <- list()
+THvsAll_optimized_Author_Annotation_cof_rename <- list()
+THvsAll_optimized_Author_Annotation_cof_p <- list()
+THvsAll_optimized_Author_Annotation_cof_p_rename <- list()
+THvsAll_optimized_Author_Annotation_cof_R2 <- list()
+THvsAll_optimized_Author_Annotation_cof_R2_rename <- list()
+
+for (i in Author_Annotation_celltype) {
+Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_THvsAll_optimized_list[[i]] <-  filter(Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_more800_perc_metadata_noIN_cohort, Author_Annotation == i)
+THvsAll_optimized_Author_Annotation_lm_list[[i]] <- lm(log10perc ~ cohort + Age + Sex + cohort:Sex, data = Allcelltype_AIDA_admix_ref_GSA_unrelated_samples_Author_Annotation_THvsAll_optimized_list[[i]])
+THvsAll_optimized_Author_Annotation_cof_list[[i]] <- as.data.frame(THvsAll_optimized_Author_Annotation_lm_list[[i]][["coefficients"]])
+THvsAll_optimized_Author_Annotation_cof_rename[[i]] <- setNames(THvsAll_optimized_Author_Annotation_cof_list[[i]], i)
+THvsAll_optimized_Author_Annotation_cof_p[[i]] <- as.data.frame(summary(THvsAll_optimized_Author_Annotation_lm_list[[i]])$coefficients[,4])
+THvsAll_optimized_Author_Annotation_cof_p_rename[[i]] <- setNames(THvsAll_optimized_Author_Annotation_cof_p[[i]], i)
+THvsAll_optimized_Author_Annotation_cof_R2[[i]] <- as.data.frame(summary(THvsAll_optimized_Author_Annotation_lm_list[[i]])$adj.r.squared)
+THvsAll_optimized_Author_Annotation_cof_R2_rename[[i]] <- setNames(THvsAll_optimized_Author_Annotation_cof_R2[[i]], i)
+}
+
+#Effect size
+THvsAll_optimized_Author_Annotation_lm_cof_df <- data.frame(THvsAll_optimized_Author_Annotation_cof_rename, check.names = FALSE)
+rownames(THvsAll_optimized_Author_Annotation_lm_cof_df) <- c("Intercept", "Thai v Other AIDA", "Age", "XY v XX", "Thai_AIDA:XY")
+THvsAll_optimized_Author_Annotation_lm_cof_mtx <- as.matrix(THvsAll_optimized_Author_Annotation_lm_cof_df)
+THvsAll_optimized_Author_Annotation_lm_cof_mtx <- THvsAll_optimized_Author_Annotation_lm_cof_mtx[rownames(THvsAll_optimized_Author_Annotation_lm_cof_mtx)!="Intercept",]
+#P-value
+THvsAll_optimized_Author_Annotation_cof_p_rename_df <- data.frame(THvsAll_optimized_Author_Annotation_cof_p_rename, check.names = FALSE)
+rownames(THvsAll_optimized_Author_Annotation_cof_p_rename_df) <- c("Intercept", "Thai v Other AIDA", "Age", "XY v XX", "Thai_AIDA:XY")
+THvsAll_optimized_Author_Annotation_cof_p_rename_df_mtx <- as.matrix(THvsAll_optimized_Author_Annotation_cof_p_rename_df)
+THvsAll_optimized_Author_Annotation_cof_p_rename_df_mtx <- THvsAll_optimized_Author_Annotation_cof_p_rename_df_mtx[rownames(THvsAll_optimized_Author_Annotation_cof_p_rename_df_mtx)!="Intercept",]
+#adj R-squared 
+THvsAll_optimized_Author_Annotation_cof_R2_rename_df <- t(data.frame(THvsAll_optimized_Author_Annotation_cof_R2_rename))
+```
+
+#Visualization 
+```{r fig.height=4.5, fig.width=12}
+THvsAll_col_fun_Author_Annotation
+THvsAll_col_fun_Author_Annotation_dict = colorRamp2(c(-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3), c("#88337A",  "#CB6CA2",  "#E594B6", "white", "#74C2C5","#00AEB2", "#009B9F"))
+
+#THvsAll_optimized
+THvsAll_optimized_Author_Annotation_lm_cof_mtx_heatmap <- Heatmap(THvsAll_optimized_Author_Annotation_lm_cof_mtx, cluster_rows = FALSE, cluster_columns = FALSE, heatmap_legend_param = list(title = "Coefficient Level", legend_direction = "horizontal", title_gp = gpar(fontsize = 14), legend_width = unit(6, "cm"), legend_height = unit(6, "cm")), border_gp = gpar(col = "black", lty = 1, lwd = 2), top_annotation = HeatmapAnnotation(empty = anno_empty(border = FALSE), Ethnicity = anno_block(labels = "Self-reported ethnicity among AIDA cohorts", gp = gpar(fill = "white"), height = unit(1, "cm"), labels_gp = gpar(col = "black", fontface = "bold", fontsize = 16))), col=THvsAll_col_fun_Author_Annotation_dict, cell_fun = function(j, i, x, y, w, h, fill) {
+    if (THvsAll_optimized_Author_Annotation_cof_p_rename_df_mtx[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if (THvsAll_optimized_Author_Annotation_cof_p_rename_df_mtx[i, j] < 0.01) {
+        grid.text("**", x, y)
+    }  else if (THvsAll_optimized_Author_Annotation_cof_p_rename_df_mtx[i, j] < 0.05) {
+       grid.text("*", x, y)
+    }
+}
+)
+THvsAll_optimized_Author_Annotation_lm_cof_mtx_heatmap
+```
+
+#save images
+```{r}
+#Fig.2A
+#UMAP
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part2_AIDA_MS/20260531/Fig.2A.pdf", width = 6, height = 4.5) 
+par(family = "Helvetica")
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples_TH_Author_Annotation_umap
+dev.off()
+
+#Fig.2B
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part2_AIDA_MS/20260531/Fig.2B.pdf", width = 8, height = 5) 
+par(family = "Helvetica")
+draw(THvsAll_optimized_Author_Annotation_lm_cof_mtx_heatmap, heatmap_legend_side = "bottom")
+dev.off()
+```
