@@ -1,0 +1,389 @@
+#Load required library
+```{r}
+library(patchwork)
+library(readr)
+library(Seurat)
+library(DESeq2)
+library(tidyverse)
+library(ggfortify)
+library(ggrepel)
+library(SeuratData)
+library(SeuratWrappers)
+library(Azimuth)
+options(future.globals.maxSize = 100e9)
+``` 
+
+#1. Read processed data 
+```{r}
+#Read Files
+#AIDA
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples <- readRDS("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples.rds")
+
+#Only Myeloid innate cells
+#Myeloid cells
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid <- readRDS("/home/benjamaporn/AIDA/GEX/AIDA_GEX/Celltypes/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid.RDS")
+#pDC
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_pDC <- readRDS("/home/benjamaporn/AIDA/GEX/AIDA_GEX/Celltypes/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_pDC.RDS")
+```
+ 
+#2. Formatting seurat data
+```{r}
+#Metadata of unrelated Samples
+AIDA_unrelated_samples_metadata <- Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples@meta.data
+rownames(AIDA_unrelated_samples_metadata) <- AIDA_unrelated_samples_metadata$barcode_name
+
+#Myeloid cells
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_unrelated_samples <- subset(x = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid, subset = barcode_name %in% AIDA_unrelated_samples_metadata$barcode_name) 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_unrelated_samples_metadata <- AddMetaData(
+  object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_unrelated_samples,
+  metadata = AIDA_unrelated_samples_metadata
+)
+
+#pDC
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_pDC_unrelated_samples <- subset(x = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_pDC, subset = barcode_name %in% AIDA_unrelated_samples_metadata$barcode_name) 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_pDC_unrelated_samples_metadata <- AddMetaData(
+  object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_pDC_unrelated_samples,
+  metadata = AIDA_unrelated_samples_metadata
+)
+
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_unrelated_samples_QC_samples_list, ".../AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_unrelated_samples_QC_samples_list.rds")
+```
+
+#3. Sample QC
+```{r}
+#No IN and sample with cell < 800 cells
+DCP_ID_more800_ID <- AIDA_unrelated_samples_metadata %>%
+  group_by(DCP_ID) %>% 
+  summarise(n_cell = n_distinct(barcode_name)) %>% 
+  filter(n_cell>800)
+#checked
+DCP_ID_less800_ID_related_LONZA_excluded <- subset(AIDA_unrelated_samples_metadata, !(DCP_ID %in% unique(DCP_ID_more800_ID$DCP_ID)))
+
+#subset seurat object
+#Myeloid cells
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_unrelated_samples_QC_samples <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_unrelated_samples_metadata, subset = DCP_ID %in% DCP_ID_more800_ID$DCP_ID)
+#pDC
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_pDC_unrelated_samples_QC_samples <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_pDC_unrelated_samples_metadata, subset = DCP_ID %in% DCP_ID_more800_ID$DCP_ID)
+
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_unrelated_samples_QC_samples_list <- list(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_unrelated_samples_QC_samples, AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_pDC_unrelated_samples_QC_samples)
+```
+
+#4. Fast integration using reciprocal PCA (RPCA): Myeloid + pDC 
+```{r}
+#Read file
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_unrelated_samples_QC_samples_list <- readRDS("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_unrelated_samples_QC_samples_list.rds")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged <- merge(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_unrelated_samples_QC_samples_list[[1]], AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_unrelated_samples_QC_samples_list[[2]])
+#convert a v3 assay to a v5 assay: https://satijalab.org/seurat/articles/seurat5_integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged[["RNA"]] <- as(object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged[["RNA"]], Class = "Assay5")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged[["RNA"]] <- split(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged[["RNA"]], f = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged$Library)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged, ".../AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged")
+
+#Follow https://satijalab.org/seurat/articles/seurat5_integration
+#Read files
+Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/myeloid_pDC_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged <-  readRDS(file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged"))
+
+#Before Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged <- NormalizeData(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged <- FindVariableFeatures(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged <- ScaleData(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged <- RunPCA(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged <- FindNeighbors(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged, dims = 1:30, reduction = "pca")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated <- FindClusters(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged, resolution = 2, cluster.name = "unintegrated_clusters")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated.rds"))
+
+#Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated <-  readRDS(file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated.rds"))
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA <- IntegrateLayers(object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated, method = RPCAIntegration, orig.reduction = "pca", new.reduction = "integrated.rpca", verbose = FALSE)
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA.rds"))
+
+#For Visualization
+#Before Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated <- readRDS(file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated.rds"))
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated_clustered <- RunUMAP(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated, dims = 1:30, reduction = "pca", reduction.name = "umap.unintegrated")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated_clustered, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_unintegrated_clustered.rds"))
+
+#RPCA
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA <- readRDS(file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA.rds"))
+#Re-join layers after integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA[["RNA"]] <- JoinLayers(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA[["RNA"]])
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA <- FindNeighbors(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA, reduction = "integrated.rpca", dims = 1:30)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA <- FindClusters(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA, resolution = 2, cluster.name = "rpca_clusters")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered <- RunUMAP(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA, reduction = "integrated.rpca", dims = 1:30, reduction.name = "umap.RPCA")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered.rds"))
+```
+
+#Differential Abundances by MiloR
+#5. DA for Myeloid+pDC of only Thai populations
+```{r}
+#TH populations
+library(miloR)
+library(SingleCellExperiment)
+library(scater)
+library(scran)
+library(dplyr)
+library(patchwork)
+library(readr)
+library(Seurat)
+library(dplyr)
+library(scuttle)
+library(irlba)
+library(BiocParallel)
+library(ggplot2)
+library(sparseMatrixStats)
+
+#Read AIDA file after merging Myeloid+pDC and then integration by rpca
+Input_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/myeloid_pDC_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered <- readRDS(file.path(Input_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered.rds"))
+
+#Subset only Thai AIDA
+Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202511/DA_myeloid_pDC_integrated_rpca/Thai_DA"
+#Subset only Thai
+TH_Myeloid_pDC_integrated_RPCA <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered, subset = Ethnicity == "Thai")
+saveRDS(TH_Myeloid_pDC_integrated_RPCA, file.path(Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA.rds"))
+
+#Create a Milo object
+TH_Myeloid_pDC_integrated_RPCA_sce <- as.SingleCellExperiment(TH_Myeloid_pDC_integrated_RPCA)
+TH_Myeloid_pDC_integrated_RPCA_milo <- Milo(TH_Myeloid_pDC_integrated_RPCA_sce)
+saveRDS(TH_Myeloid_pDC_integrated_RPCA_milo, file.path(Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA_milo.rds"))
+
+##1_Preprocessing (at k=300, p=0.1))
+##Applying with GLMM (per library) of Thai samples
+##Construct KNN 
+TH_Myeloid_pDC_integrated_RPCA_milo_buildGraph <- buildGraph(TH_Myeloid_pDC_integrated_RPCA_milo, k = 300, d = 30)
+
+#2_Defining representative neighbourhoods
+TH_Myeloid_pDC_integrated_RPCA_milo_make_nH <- makeNhoods(TH_Myeloid_pDC_integrated_RPCA_milo_buildGraph, prop = 0.1, k = 300, d = 30, refined = TRUE, refinement_scheme = "graph")
+
+##3_Count Cells (per library)
+colData(TH_Myeloid_pDC_integrated_RPCA_milo_make_nH)$ObsID <- paste(colData(TH_Myeloid_pDC_integrated_RPCA_milo_make_nH)$Library, colData(TH_Myeloid_pDC_integrated_RPCA_milo_make_nH)$DCP_ID, sep="_")
+TH_Myeloid_pDC_integrated_RPCA_milo_count <- countCells(TH_Myeloid_pDC_integrated_RPCA_milo_make_nH, meta.data = data.frame(colData(TH_Myeloid_pDC_integrated_RPCA_milo_make_nH)), samples="ObsID")
+saveRDS(TH_Myeloid_pDC_integrated_RPCA_milo_count, file.path(Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA_milo_count.rds"))
+
+#4_GLMM
+TH_Myeloid_pDC_integrated_RPCA_milo_count <- readRDS(file.path(Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA_milo_count.rds"))
+#Metadata
+TH_Myeloid_pDC_integrated_RPCA_milo_Obs <- data.frame(colData(TH_Myeloid_pDC_integrated_RPCA_milo_count))[,c("Library", "Genotyping_ID", "DCP_ID", "Ethnicity", "Age", "Sex", "Country.x", "Red_ref", "Blue_ref", "Orange_ref", "Red_GSA", "Blue_GSA", "Orange_GSA", "ObsID")]
+TH_Myeloid_pDC_integrated_RPCA_milo_Obs <- distinct(TH_Myeloid_pDC_integrated_RPCA_milo_Obs)
+rownames(TH_Myeloid_pDC_integrated_RPCA_milo_Obs) <- TH_Myeloid_pDC_integrated_RPCA_milo_Obs$ObsID
+## Reorder rownames to match columns of nhoodCounts(milo)
+TH_Myeloid_pDC_integrated_RPCA_milo_Obs <- TH_Myeloid_pDC_integrated_RPCA_milo_Obs[colnames(nhoodCounts(TH_Myeloid_pDC_integrated_RPCA_milo_count)), , drop=FALSE]
+rownames(TH_Myeloid_pDC_integrated_RPCA_milo_Obs) <- TH_Myeloid_pDC_integrated_RPCA_milo_Obs$ObsID
+saveRDS(TH_Myeloid_pDC_integrated_RPCA_milo_Obs, file.path(Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA_milo_Obs.rds"))
+
+#The impact of Blue ancestry
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm <- testNhoods(TH_Myeloid_pDC_integrated_RPCA_milo_count, design = ~ Sex + Age + Blue_ref + (1|Library), design.df = TH_Myeloid_pDC_integrated_RPCA_milo_Obs, fdr.weighting = "graph-overlap", glmm.solver="Fisher")
+saveRDS(TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm, file.path(Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm.rds"))
+```
+
+#6. Visualization of Myeloid + pDC of Thai populations
+```{r fig.height=5, fig.width=6.5}
+DA_TH_Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202511/DA_myeloid_pDC_integrated_rpca/Thai_DA"
+TH_Myeloid_pDC_integrated_RPCA <- readRDS(file.path(DA_TH_Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA.rds"))
+TH_Myeloid_pDC_integrated_RPCA_milo <- readRDS(file.path(DA_TH_Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA_milo.rds"))
+TH_Myeloid_pDC_integrated_RPCA_milo_count <- readRDS(file.path(DA_TH_Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA_milo_count.rds"))
+TH_Myeloid_pDC_integrated_RPCA_milo_Obs <- readRDS(file.path(DA_TH_Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA_milo_Obs.rds"))
+
+#GLMM results
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm <- readRDS(file.path(DA_TH_Output_PATH, "/TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm.rds"))
+
+#Fig. 3A (Top)
+TH_Myeloid_pDC_integrated_RPCA@meta.data$Author_Annotation <- factor(TH_Myeloid_pDC_integrated_RPCA@meta.data$Author_Annotation, levels = c("Myeloid_unknown", "CD14+_Monocyte",  "CD16+_Monocyte",  "cDC1", "cDC2", "DC_SIGLEC6hi", "pDC"))
+TH_Myeloid_pDC_integrated_RPCA_plot <- DimPlot(TH_Myeloid_pDC_integrated_RPCA, reduction = "umap.RPCA", group.by = "Author_Annotation", label = F, repel = TRUE, raster=FALSE, label.size = 3, cols = c("Myeloid_unknown"="#01579B", "CD16+_Monocyte"="#FFCA99",  "DC_SIGLEC6hi"="#006666", "cDC1"="#00FFFF", "cDC2"="#99FFFF", "CD14+_Monocyte"="#CC5500", "pDC"="#30BCAD")) + labs(title = "Myeloid innate cells across Thai populations", caption = "Author Annotation: Thai AIDA (n = 25,040 cells)") + xlab("UMAP1") + ylab("UMAP2")
+TH_Myeloid_pDC_integrated_RPCA_plot
+
+#Add log normalized count to Milo object
+TH_Myeloid_pDC_integrated_RPCA_milo_count <- logNormCounts(TH_Myeloid_pDC_integrated_RPCA_milo_count)
+#checked 
+TH_Myeloid_pDC_integrated_RPCA_milo_count_checked_logcount <- data.frame(TH_Myeloid_pDC_integrated_RPCA_milo_count@assays@data@listData[["logcounts"]])
+TH_Myeloid_pDC_integrated_RPCA_milo_count_checked_count <- data.frame(TH_Myeloid_pDC_integrated_RPCA_milo_count@assays@data@listData[["counts"]])
+TH_Myeloid_pDC_integrated_RPCA_milo_count_size_factor <- 
+data.frame(TH_Myeloid_pDC_integrated_RPCA_milo_count@colData@listData[["sizeFactor"]])
+
+#Fig. 3A (Bottom)
+TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh <- buildNhoodGraph(TH_Myeloid_pDC_integrated_RPCA_milo_count)
+#GLMM
+#The impact of blue ancestry
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_plot <- plotNhoodGraphDA(TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh, TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm, alpha=0.05, layout="UMAP.RPCA") +
+scale_fill_gradient2(low = "#8d372c", high = "#2c828d", mid = 'white', midpoint = 0, name = "logFC")
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_plot
+
+#Fig. 3B
+Myeloid_pDC_Author_Annotation_celltype_DA_GLMM <- c("Myeloid_unknown", "CD14+_Monocyte", "CD16+_Monocyte", "cDC2", "pDC")
+#Annotate cells
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation <- annotateNhoods(TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh, TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm, coldata_col = "Author_Annotation")
+
+#Remove nhoods that cannot pass DA testing
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA <- na.omit(TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation)
+#subset only CD14+ Monocyte nhoods for DEGs testing
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA_CD14_Monocyte <- filter(TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA, Author_Annotation == "CD14+_Monocyte")
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA_CD14_Monocyte$NhoodGroup <- TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA_CD14_Monocyte$Author_Annotation
+
+#Plot DA for overall cell abundances
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA$Author_Annotation <- factor(TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA$Author_Annotation, levels = Myeloid_pDC_Author_Annotation_celltype_DA_GLMM)
+
+#Ploting
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_plotDAbeeswarm <- plotDAbeeswarm(TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA, group.by = "Author_Annotation", alpha= 0.05) + 
+xlab("") +
+ggtitle("Thai populations (N = 59)")+
+theme_light()+
+theme(text = element_text(size = 16)) + 
+annotate(geom="text", x=5, y=2, label="Enriched with\nBlue ancestry", color="#2c828d") + 
+annotate(geom="text", x=5, y=-2, label="Depleted with\nBlue ancestry", color="#8d372c") + 
+xlab("") +
+scale_color_gradient2(low = "#8d372c", high = "#2c828d", mid = 'white', midpoint = 0, name = "logFC")
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_plotDAbeeswarm
+```
+
+#7. Gene expression of nhoods associated with Blue ancestry
+```{r fig.height=12, fig.width=10}
+#Integrate objects has logcounts as input for gene expression
+#Finding gene signatures for neighbourhoods
+##Exclude zero counts genes
+TH_Myeloid_pDC_integrated_RPCA_keep.rows <- rowSums(logcounts(TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh)) != 0
+TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh <- TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh[TH_Myeloid_pDC_integrated_RPCA_keep.rows, ]
+
+## Find HVGs
+TH_Myeloid_pDC_integrated_RPCA_dec <- modelGeneVar(TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh)
+TH_Myeloid_pDC_integrated_RPCA_hvgs <- getTopHVGs(TH_Myeloid_pDC_integrated_RPCA_dec, n=2000)
+
+#The impact of Blue ancestry 
+#DA results of only CD14+_Monocyte nhoods
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA_CD14_Monocyte
+
+#DGE testing within a nhood group 
+#No need to perform findNhoodGroupMarkers() since those nhoods have already annotated
+TH_dge_blue_ref_CD14_Monocyte  <- testDiffExp(TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh, TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA_CD14_Monocyte, design = ~ Sex + Age + Blue_ref, meta.data = data.frame(colData(TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh)), subset.row = TH_Myeloid_pDC_integrated_RPCA_hvgs)
+TH_dge_blue_ref_CD14_Monocyte_df <- as.data.frame(TH_dge_blue_ref_CD14_Monocyte[["CD14+_Monocyte"]])
+
+#Identifying signatures of DA subpopulations
+#Ancestry
+TH_dge_blue_ref_CD14_Monocyte_df$GeneID <- row.names(TH_dge_blue_ref_CD14_Monocyte_df)
+TH_dge_blue_ref_CD14_Monocyte_gene_markers <- TH_dge_blue_ref_CD14_Monocyte_df[which(TH_dge_blue_ref_CD14_Monocyte_df$adj.P.Val < 0.05), "GeneID"]
+
+#compute gene x nhood expression matrix
+TH_CD14_Monocyte_integrated_RPCA_milo_count_buildnh_gex_blue_ref <- calcNhoodExpression(TH_Myeloid_pDC_integrated_RPCA_milo_count_buildnh, subset.row=TH_dge_blue_ref_CD14_Monocyte_gene_markers)
+
+#Plotting
+#only Upregulated genes with blue ancestry
+TH_dge_blue_ref_CD14_Monocyte_df_UP <- filter(TH_dge_blue_ref_CD14_Monocyte_df, logFC > 0.5 & adj.P.Val < 0.05)
+TH_CD14_Monocyte_integrated_RPCA_milo_count_buildnh_gex_blue_ref_heatmap_plot <- plotNhoodExpressionDA(TH_CD14_Monocyte_integrated_RPCA_milo_count_buildnh_gex_blue_ref, TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_annotate_Author_Annotation_noNA_CD14_Monocyte, features = TH_dge_blue_ref_CD14_Monocyte_df_UP$GeneID,
+                      assay="logcounts", alpha = 0.05,
+                      scale_to_1 = TRUE, cluster_features = TRUE
+                      )+
+theme(text = element_text(size = 14))
+TH_CD14_Monocyte_integrated_RPCA_milo_count_buildnh_gex_blue_ref_heatmap_plot
+```
+
+#8. Gene density of gene of interest
+```{r fig.height=3, fig.width=4}
+#Plot density
+library("Nebulosa")
+
+#Fig. 3D
+#plot individual genes
+#upregulated by blue ancestry
+TH_Myeloid_pDC_integrated_RPCA_MXD1_density <- plot_density(TH_Myeloid_pDC_integrated_RPCA, "MXD1", pal = "viridis") + theme(plot.title = element_text(face = "italic")) + xlab("UMAP1") + ylab("UMAP2")
+TH_Myeloid_pDC_integrated_RPCA_NFKBIA_density <- plot_density(TH_Myeloid_pDC_integrated_RPCA, "NFKBIA", pal = "viridis") + theme(plot.title = element_text(face = "italic")) + xlab("UMAP1") + ylab("UMAP2")
+TH_Myeloid_pDC_integrated_RPCA_OSM <- plot_density(TH_Myeloid_pDC_integrated_RPCA, "OSM", pal = "viridis") + theme(plot.title = element_text(face = "italic")) + xlab("UMAP1") + ylab("UMAP2")
+TH_Myeloid_pDC_integrated_RPCA_HLADQB1 <- plot_density(TH_Myeloid_pDC_integrated_RPCA, "HLA-DQB1", pal = "viridis") + theme(plot.title = element_text(face = "italic")) + xlab("UMAP1") + ylab("UMAP2")
+TH_Myeloid_pDC_integrated_RPCA_MXD1_density
+```
+
+#9. Pathway analysis
+```{r}
+#Set seed
+set.seed(123456)
+
+library(tidyverse) 
+library(RColorBrewer) 
+library(fgsea)
+library(msigdbr)
+```
+
+```{r}
+#Retrieve the gene sets data frame 
+human_gene_sets_df <- msigdbr(db_species = "HS", species = 'Homo sapiens', category = 'H')
+
+# Convert to named list format required by fgsea
+human_gene_sets_gsea <- human_gene_sets_df %>% split(x = .$gene_symbol, f = .$gs_name)
+cat(paste("Loaded", length(human_gene_sets_gsea), "gene sets\n"))
+
+#Patways
+human_gene_sets_gsea  <- human_gene_sets_gsea[!is.na(names(human_gene_sets_gsea))]
+```
+
+```{r fig.height=8, fig.width=8}
+#Pathways from All signature genes of DA results of CD14+ Monocytes by Blue ancestry
+TH_dge_blue_ref_CD14_Monocyte_df_rankings <- sign(TH_dge_blue_ref_CD14_Monocyte_df$logFC)*(-log10(TH_dge_blue_ref_CD14_Monocyte_df $adj.P.Val))
+names(TH_dge_blue_ref_CD14_Monocyte_df_rankings) <- TH_dge_blue_ref_CD14_Monocyte_df$GeneID
+TH_dge_blue_ref_CD14_Monocyte_df_rankings <- sort(TH_dge_blue_ref_CD14_Monocyte_df_rankings, decreasing = TRUE)
+
+#Run GSEA 
+TH_dge_blue_ref_CD14_Monocyte_df_GSEAres <- fgsea(pathways = human_gene_sets_gsea, 
+                 stats = TH_dge_blue_ref_CD14_Monocyte_df_rankings,
+                 scoreType = 'std', 
+                 minSize = 10,
+                 maxSize = 500,
+                 nproc = 1)
+
+#Plotting
+TH_dge_blue_ref_CD14_Monocyte_df_GSEAres_plot <- ggplot(TH_dge_blue_ref_CD14_Monocyte_df_GSEAres) +
+  geom_point(aes(x = NES, y = reorder(pathway, NES), color = -log10(padj), size=size)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=rel(1.15)),
+        axis.title = element_text(size=rel(1.15))) +
+  xlab("Normalized Enrichment Score") +
+  ylab("Pathway") +
+  ggtitle("CD14+ Monocytes among Thai Populations (N=59)") +
+  theme(plot.title = element_text(hjust=0.5,	face = "bold"))  +
+  scale_color_gradientn(name = "Significance \n (-log10(padj))", colors = hcl.colors(50, "Temps", rev = T)) +
+  theme(legend.title = element_text(size=rel(1.15),
+	hjust=0.5, 
+	face="bold"))+
+  guides(size = guide_legend(order=1),
+         color = guide_colourbar(order=2))
+TH_dge_blue_ref_CD14_Monocyte_df_GSEAres_plot
+```
+
+#10. Save figures
+```{r}
+#Fig. 3A
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part3_AIDA_MS/20260531/Fig.3A_UMAP.pdf", width = 6.5, height = 5)
+par(family = "Helvetica")
+TH_Myeloid_pDC_integrated_RPCA_plot
+dev.off()
+
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part3_AIDA_MS/20260531/Fig.3A_DA.pdf", width = 5, height = 3)
+par(family = "Helvetica")
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_glmm_plot
+dev.off()
+
+#Fig. 3B
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part3_AIDA_MS/20260531/Fig.3B.pdf", width = 8, height = 5)
+par(family = "Helvetica")
+TH_Myeloid_pDC_integrated_RPCA_milo_count_da_results_Library_blue_ref_plotDAbeeswarm
+dev.off()
+
+#Fig. 3C
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part3_AIDA_MS/20260531/Fig.3C.pdf", width = 10, height = 16)
+par(family = "Helvetica")
+TH_CD14_Monocyte_integrated_RPCA_milo_count_buildnh_gex_blue_ref_heatmap_plot
+dev.off()
+
+#DA:Ancestry
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part3_AIDA_MS/20260531/Fig.3D.pdf", width = 8, height = 6)
+# 2. Create a plot
+par(family = "Helvetica")
+TH_Myeloid_pDC_integrated_RPCA_MXD1_density + 
+TH_Myeloid_pDC_integrated_RPCA_NFKBIA_density +
+TH_Myeloid_pDC_integrated_RPCA_OSM +
+TH_Myeloid_pDC_integrated_RPCA_HLADQB1 +
+plot_layout(ncol = 2, nrow = 2)
+dev.off()
+```
+
+
+
+

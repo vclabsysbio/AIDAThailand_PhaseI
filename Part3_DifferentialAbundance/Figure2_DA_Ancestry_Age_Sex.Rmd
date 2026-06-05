@@ -1,0 +1,179 @@
+#Load required library
+```{r}
+library(miloR)
+library(SingleCellExperiment)
+library(BiocParallel)
+library(scater)
+library(scran)
+library(dplyr)
+library(patchwork)
+library(readr)
+library(Seurat)
+library(dplyr)
+```  
+
+#1. Read integrated seurat object and subset only the Thai population
+```{r}
+#AIDA
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024 <- readRDS("/home/benjamaporn/AIDA/processed_KH/Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024.rds")
+
+#TH
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_TH <- subset(x = Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024, subset = Ethnicity == "Thai")
+
+#Genetics 
+#Admixture 
+#AIDA with ref
+AIDA_merged_AADR_imputed_admixture_k3 <- read_tsv("/home/benjamaporn/AIDA/Analysis/Analysis202510/AIDA_Genomics_Admixture_metadata/AIDA_merged_AADR_hg38_autosome_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_onlyAIDA_select.tsv") 
+AIDA_merged_AADR_imputed_admixture_k3_rename <- AIDA_merged_AADR_imputed_admixture_k3 %>% 
+  rename("Genotyping_ID"="ind") %>% 
+  rename("Red_ref"="EAS") %>% 
+  rename("Blue_ref"="MSEA") %>% 
+  rename("Orange_ref"="SAS")
+
+#AIDA from GSA
+AIDA_GSA_admixture_k3 <- read_tsv("/home/benjamaporn/AIDA/Analysis/Analysis202510/AIDA_Genomics_Admixture_metadata/AIDA_vQCed_autosome_ref_matched_unrelatedSamples_noLONZA_pop_ordered_k3.tsv")
+AIDA_GSA_admixture_k3_rename <- AIDA_GSA_admixture_k3 %>% 
+  rename("Genotyping_ID"="ind") %>%
+  rename("Red_GSA"="EAS") %>% 
+  rename("Blue_GSA"="MSEA") %>% 
+  rename("Orange_GSA"="SAS")
+
+#Genetic factor
+AIDA_admix_ref_GSA <- merge(AIDA_merged_AADR_imputed_admixture_k3_rename, AIDA_GSA_admixture_k3_rename, by = "Genotyping_ID")
+TH_AIDA_admix_ref_GSA <- filter(AIDA_admix_ref_GSA, Country.x == "Thailand") %>% select(Genotyping_ID, Country.x, Red_ref, Blue_ref, Orange_ref, Red_GSA, Blue_GSA, Orange_GSA)
+
+#add genetic factors and sampling times in TH Seurat (all cell types)
+TH_AIDA_admix_ref_GSA_metadata <- merge(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_TH@meta.data, TH_AIDA_admix_ref_GSA, by="Genotyping_ID") %>%
+mutate(Sampling_time = case_when(startsWith(Library, "TH_MAH_B001") ~ "Group A",
+                                   startsWith(Library, "TH_MAH_B002") ~ "Group A",
+                                   startsWith(Library, "TH_MAH_B003") ~ "Group B",
+                                   startsWith(Library, "TH_MAH_B004") ~ "Group B",
+                                   ))
+rownames(TH_AIDA_admix_ref_GSA_metadata) <- TH_AIDA_admix_ref_GSA_metadata$barcode_name
+
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_TH_AIDA_admix_ref_GSA <- AddMetaData(
+  object = Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_TH,
+  metadata = TH_AIDA_admix_ref_GSA_metadata
+)
+
+#Checked
+DimPlot(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_TH_AIDA_admix_ref_GSA, reduction = "umap", group.by = "Author_Annotation", label = F, repel = FALSE, raster=FALSE)
+```
+
+#2. Differential abundance (DA) analysis by MiloR
+```{r}
+DefaultAssay(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_TH_AIDA_admix_ref_GSA)
+#Create a Milo object
+#TH
+TH_AIDA_ref_GSA_4level_integrated_sce <- as.SingleCellExperiment(Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_TH_AIDA_admix_ref_GSA)
+TH_AIDA_ref_GSA_4level_integrated_milo <- Milo(TH_AIDA_ref_GSA_4level_integrated_sce)
+saveRDS(TH_AIDA_ref_GSA_4level_integrated_milo, file = ".../TH_AIDA_ref_GSA_4level_integrated_milo.rds")
+```
+
+#3. Preproceesing step of DA across 59 Thai populations
+```{r}
+#All Thai AIDA (n=59 people)
+#Read Milo object 
+TH_AIDA_ref_GSA_4level_integrated_milo <- readRDS("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/TH_DA_output/TH_AIDA_ref_GSA_4level_integrated_milo.rds")
+
+#3.1 Construct KNN graph
+TH_AIDA_ref_GSA_4level_integrated_k300_buildGraph <- buildGraph(TH_AIDA_ref_GSA_4level_integrated_milo, k = 300, d = 30)
+
+#3.2 Defining representative neighbourhoods
+TH_AIDA_ref_GSA_4level_integrated_k300_make_nH <- makeNhoods(TH_AIDA_ref_GSA_4level_integrated_k300_buildGraph, prop = 0.05, k = 300, d = 30, refined = TRUE, refinement_scheme = "graph")
+
+#3.3 Count Cells (per rxn of each individual)
+colData(TH_AIDA_ref_GSA_4level_integrated_k300_make_nH)$ObsID <- paste(colData(TH_AIDA_ref_GSA_4level_integrated_k300_make_nH)$Library, colData(TH_AIDA_ref_GSA_4level_integrated_k300_make_nH)$DCP_ID, sep="_")
+TH_AIDA_ref_GSA_4level_integrated_k300_count <- countCells(TH_AIDA_ref_GSA_4level_integrated_k300_make_nH, meta.data = data.frame(colData(TH_AIDA_ref_GSA_4level_integrated_k300_make_nH)), samples="ObsID")
+saveRDS(TH_AIDA_ref_GSA_4level_integrated_k300_count, file = ".../TH_AIDA_ref_GSA_4level_integrated_k300_count.rds")
+
+#3.4 Metadata
+TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs <- data.frame(colData(TH_AIDA_ref_GSA_4level_integrated_k300_count))[,c("Library", "Genotyping_ID", "DCP_ID", "Ethnicity", "Age", "Sex", "Country.x", "Red_ref", "Blue_ref", "Orange_ref", "Red_GSA", "Blue_GSA", "Orange_GSA", "ObsID", "Sampling_time")]
+TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs <- distinct(TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs)
+rownames(TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs) <- TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs$ObsID
+#Reorder rownames to match columns of nhoodCounts(milo)
+TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs <- TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs[colnames(nhoodCounts(TH_AIDA_ref_GSA_4level_integrated_k300_count)), , drop=FALSE]
+rownames(TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs) <- TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs$ObsID
+```
+
+#4. Applying with GLM (library/rxn correction)
+```{r}
+#The impact of blue ancestry across Thai populations (GLMM)
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm <- testNhoods(TH_AIDA_ref_GSA_4level_integrated_k300_count, design = ~ Sex + Age + Blue_ref +(1|Library), design.df = TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs, fdr.weighting = "graph-overlap", glmm.solver="Fisher")
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_GSA_glmm <- testNhoods(TH_AIDA_ref_GSA_4level_integrated_k300_count, design = ~ Sex + Age + Blue_GSA +(1|Library), design.df = TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs, fdr.weighting = "graph-overlap", glmm.solver="Fisher")
+
+#The impact of red ancestry across Thai populations (GLMM)
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Red_ref_glmm <- testNhoods(TH_AIDA_ref_GSA_4level_integrated_k300_count, design = ~ Sex + Age + Red_ref +(1|Library), design.df = TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs, fdr.weighting = "graph-overlap", glmm.solver="Fisher")
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Red_GSA_glmm <- testNhoods(TH_AIDA_ref_GSA_4level_integrated_k300_count, design = ~ Sex + Age + Red_GSA +(1|Library), design.df = TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs, fdr.weighting = "graph-overlap", glmm.solver="Fisher")
+
+#The impact of orange ancestry across Thai populations (GLMM)
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Orange_ref_glmm <- testNhoods(TH_AIDA_ref_GSA_4level_integrated_k300_count, design = ~ Sex + Age + Orange_ref +(1|Library), design.df = TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs, fdr.weighting = "graph-overlap", glmm.solver="Fisher")
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Orange_GSA_glmm <- testNhoods(TH_AIDA_ref_GSA_4level_integrated_k300_count, design = ~ Sex + Age + Orange_GSA +(1|Library), design.df = TH_AIDA_ref_GSA_4level_integrated_k300_milo_Obs, fdr.weighting = "graph-overlap", glmm.solver="Fisher")
+
+TH_AIDA_Output_Path <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/TH_DA_output/TH_AIDA_ref_GSA_4level_integrated_DAresults"
+saveRDS(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm, file.path(TH_AIDA_Output_Path, "/TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm.rds"))
+saveRDS(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_GSA_glmm, file.path(TH_AIDA_Output_Path, "/TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_GSA_glmm.rds"))
+saveRDS(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Red_ref_glmm, file.path(TH_AIDA_Output_Path, "/TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Red_ref_glmm.rds"))
+saveRDS(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Red_GSA_glmm, file.path(TH_AIDA_Output_Path, "/TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Red_GSA_glmm.rds"))
+saveRDS(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Orange_ref_glmm, file.path(TH_AIDA_Output_Path, "/TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Orange_ref_glmm.rds"))
+saveRDS(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Orange_GSA_glmm, file.path(TH_AIDA_Output_Path, "/TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Orange_GSA_glmm.rds"))
+saveRDS(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_GroupBvsA, file.path(TH_AIDA_Output_Path, "/TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_GroupBvsA.rds"))
+```
+
+#5. Visualization 
+#UMAP: Fig. 2C 
+```{r fig.height=4.5, fig.width=8}
+#Read files
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm <- readRDS(file.path(TH_AIDA_Output_Path, "/TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm.rds"))
+#Read count file
+TH_AIDA_ref_GSA_4level_integrated_k300_count <- readRDS("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/TH_DA_output/TH_AIDA_ref_GSA_4level_integrated_k300_count.rds")
+
+#3.4 Build graph
+TH_AIDA_ref_GSA_4level_integrated_k300_count_buildnh <- buildNhoodGraph(TH_AIDA_ref_GSA_4level_integrated_k300_count)
+
+#Fig. 2C: The impact of blue ancestry
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_plot <- plotNhoodGraphDA(TH_AIDA_ref_GSA_4level_integrated_k300_count_buildnh, TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm, alpha=0.05) +
+theme(text = element_text(size = 12)) + 
+labs(title = "DA analysis of Blue ancestry on immune cell compositions among Thai populations") +
+scale_fill_gradient2(low = "#8d372c", high = "#2c828d", mid = 'white', midpoint = 0, name = "logFC")
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_plot
+```
+
+#5. Visualization for Fig. 2D 
+#Beeswarm plot: 
+```{r fig.height=7, fig.width=6}
+#TH (+- memory_B_unknown if runs in different time)
+Author_Annotation_celltype_DA_GLMM <- c("Myeloid_unknown", "CD14+_Monocyte", "CD16+_Monocyte", "cDC2", "pDC", "Platelet", "NK_unknown", "CD16+_NK", "CD56+_NK", "T_unknown","CD4+_T_unknown", "CD4+_T_naive", "CD4+_T_cm",  "CD4+_T_cyt", "CD4+_T_em", "CD8+_T_unknown", "CD8+_T_naive", "CD8+_T_GZMBhi", "CD8+_T_GZMKhi", "gdT_GZMKhi", "gdT_GZMBhi", "MAIT",  "Treg", "atypical_B", "naive_B", "memory_B_unknown", "memory_B_IGHMlo", "memory_B_IGHMhi", "Plasma_Cell")
+ 
+#Genetics
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_annotate_Author_Annotation <- annotateNhoods(TH_AIDA_ref_GSA_4level_integrated_k300_count_buildnh, TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm, coldata_col = "Author_Annotation")
+#Remove nhoods that cannot pass DA testing
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_annotate_Author_Annotation$Author_Annotation <- factor(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_annotate_Author_Annotation$Author_Annotation, levels = Author_Annotation_celltype_DA_GLMM)
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_annotate_Author_Annotation_noNA <- na.omit(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_annotate_Author_Annotation) 
+#Ploting
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_annotate_Author_Annotation_noNA_plot <- plotDAbeeswarm(TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_annotate_Author_Annotation_noNA, group.by = "Author_Annotation", alpha= 0.05) +
+xlab("") +
+ggtitle("")+
+theme_light()+
+theme(text = element_text(size = 14)) +
+scale_color_gradient2(low = "#8d372c", high = "#2c828d", mid = 'white', midpoint = 0, name = "logFC")+ 
+annotate(geom="text", x=30, y=3, label="Enriched with Blue ancestry", color="#2c828d") + 
+annotate(geom="text", x=30, y=-3, label="Depleted with Blue ancestry", color="#8d372c")
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_annotate_Author_Annotation_noNA_plot
+```
+
+#6. Save images
+```{r}
+#Fig. 2C
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part2_AIDA_MS/20260531/Fig.2C.pdf", width = 8, height = 5)
+par(family = "Helvetica")
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_plot +
+theme(text = element_text(size = 12))
+dev.off()
+
+#Fig. 2D
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part2_AIDA_MS/20260531/Fig.2D.pdf", width = 8, height = 8)
+par(family = "Helvetica")
+TH_AIDA_ref_GSA_4level_integrated_k300_count_da_results_Blue_ref_glmm_annotate_Author_Annotation_noNA_plot
+dev.off()
+```
