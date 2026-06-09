@@ -1,0 +1,251 @@
+#Load required library
+```{r}
+library(miloR)
+library(variancePartition)
+library(Seurat)
+library(dplyr) 
+library(tidyverse)
+```
+
+#Pseudobulk RNA-seq analysis
+#1. Read outputs of Thai populations
+```{r}
+#Myeloid + pDC
+Myeloid_pDC_Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/myeloid_pDC_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered <- readRDS(file.path(Myeloid_pDC_Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered.rds"))
+
+#TH outputs
+TH_Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202603/Part4_AIDA_Age_Sex_DEGs_Output/Thai_AIDA"
+TH_AIDA_Myeloid_pDC_dream_modelFit_eBayes <- readRDS(file.path(TH_Output_PATH, "/TH_AIDA_Myeloid_pDC_dream_modelFit_eBayes.rds"))
+```
+
+#2. The DEGs by Blue ancestry in the Thai population
+```{r fig.height=4, fig.width=10}
+#Myeloid_pDC
+Myeloid_pDC_Author_Annotation_celltype <- c("Myeloid_unknown", "CD14+_Monocyte", "CD16+_Monocyte", "cDC2")
+#Myeloid_pDC
+TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref <- list()
+TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed <- list()
+TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_sig_count <- list()
+for (i in Myeloid_pDC_Author_Annotation_celltype) {
+  TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref[[i]] <- topTable(TH_AIDA_Myeloid_pDC_dream_modelFit_eBayes[[i]], coef = "Blue_ref", adjust="BH", number = Inf) 
+  TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed[[i]] <- data.frame(TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref[[i]]) %>%  
+  mutate(diffexpressed = case_when(logFC > 0.5 & adj.P.Val < 0.05 ~ "Upregulated", 
+                                   logFC < -0.5 & adj.P.Val < 0.05 ~ "Downregulated",
+                                   TRUE ~ "Not significant"))
+  TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed[[i]]$Gene <- rownames(TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed[[i]])
+  TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_sig_count[[i]] <- subset(TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed[[i]], diffexpressed != "Not significant") %>% group_by(diffexpressed) %>% summarise(DEGs = n_distinct(Gene))
+}
+```
+
+#3. Plot per TH individual
+```{r}
+#Myeloid_pDC cells in Thai  
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered_TH_CD14mono <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered, subset = Ethnicity == "Thai" & Author_Annotation == "CD14+_Monocyte")
+
+#Metadata
+#perLibrary
+TH_AIDA_CD14mono_integrated_metadata_perLibrary <- select(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered_TH_CD14mono@meta.data, Library, Genotyping_ID, DCP_ID, Age, Sex, Author_Annotation, Blue_ref, Red_ref, Orange_ref) %>%
+distinct(DCP_ID, Library, .keep_all = TRUE)  
+row.names(TH_AIDA_CD14mono_integrated_metadata_perLibrary) <- NULL
+#Format metadata
+TH_AIDA_CD14mono_integrated_metadata_perLibrary$DCP_ID <- gsub("_", "-", TH_AIDA_CD14mono_integrated_metadata_perLibrary$DCP_ID)
+TH_AIDA_CD14mono_integrated_metadata_perLibrary$Library <-gsub("_", "-", TH_AIDA_CD14mono_integrated_metadata_perLibrary$Library)
+rownames(TH_AIDA_CD14mono_integrated_metadata_perLibrary) <- paste(TH_AIDA_CD14mono_integrated_metadata_perLibrary$Library, TH_AIDA_CD14mono_integrated_metadata_perLibrary$DCP_ID, sep = "_")
+
+#Individual
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP <- AggregateExpression(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered_TH_CD14mono, group.by = "DCP_ID", return.seurat = F)
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_countdata <- as.matrix(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP[["RNA"]])
+
+#the data stored in a DGEList object
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE <- DGEList(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_countdata)
+
+# Perform TMM normalization
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE <- calcNormFactors(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE)
+
+# Specify variables to be included in the voom() estimates of uncertainty
+TH_AIDA_CD14mono_integrated_metadata_perDCP_blue <- TH_AIDA_CD14mono_integrated_metadata_perLibrary %>% arrange(Blue_ref) %>%
+distinct(DCP_ID, .keep_all = TRUE) 
+CD14mono_DCP_design <- model.matrix(~ Sex + Blue_ref + Age, TH_AIDA_CD14mono_integrated_metadata_perDCP_blue)
+
+# Estimate precision weights for each gene and sample
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes <- voom(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE, CD14mono_DCP_design)
+
+#data for Visualization
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx <- as.matrix(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes)
+
+#DEGs
+TH_AIDA_cd14mono_dream_modelFit_Blue_ref_perDCP <- TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref[["CD14+_Monocyte"]]
+TH_AIDA_cd14mono_dream_modelFit_Blue_ref_perDCP$Gene <- rownames(TH_AIDA_cd14mono_dream_modelFit_Blue_ref_perDCP)
+TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed_CD14mono_sig_orderlogFC <- subset(TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed[["CD14+_Monocyte"]], diffexpressed != "Not significant") %>% arrange(logFC)
+rownames(TH_AIDA_CD14mono_integrated_metadata_perDCP_blue) <- TH_AIDA_CD14mono_integrated_metadata_perDCP_blue$DCP_ID
+
+#All DEGs by blue ancestry
+#Reorder colnames based on % blue ancestry and rowname based on logFC by obtaining top genes and sig genes 
+#from normalized count data and logcpm
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder <- bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx[rownames(TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed_CD14mono_sig_orderlogFC), rownames(TH_AIDA_CD14mono_integrated_metadata_perDCP_blue)]
+```
+
+#4. Visualization
+#Fig. 3E
+```{r fig.height=7, fig.width=6}
+library(ComplexHeatmap)
+library(colorRamp2)
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_scaled_data <- t(scale(t(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder)))
+
+col_admix_Blue_ancestry <- colorRamp2(c(-4, -3, -2, -1, 0, 1, 2, 3, 4), c("#8d362c", '#b44538', '#ca6154', '#d6857b', "white", '#7bccd6', '#54bdca', "#38a6b4", "#2c828d"))
+
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_scaled_data_ht <- Heatmap(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_scaled_data, name = "Z-score\n(logcpm)", cluster_rows = FALSE, cluster_columns = F, col = col_admix_Blue_ancestry, show_column_names = FALSE, column_title = "Individual ID", 
+   column_title_side = "bottom",
+    top_annotation = HeatmapAnnotation(`% Blue Ancestry` = anno_points(TH_AIDA_CD14mono_integrated_metadata_perDCP_blue$Blue_ref, ylim = c(0, 1), height = unit(2, "cm"))),
+    right_annotation = rowAnnotation(logFC = anno_barplot(TH_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed_CD14mono_sig_orderlogFC$logFC, ylim = c(-4, 4), width = unit(2, "cm")))
+)
+```
+
+#Fig. 3F
+```{r fig.height=3, fig.width=3}
+library(ggplot2)
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_df <- data.frame(t(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder))
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_df$DCP_ID <- rownames(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_df)
+
+#Merge metadata and normalized count data
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_merge <- merge(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_df, TH_AIDA_CD14mono_integrated_metadata_perDCP_blue, by = "DCP_ID")
+
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_merge_HLA.DQB1 <- ggplot(bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_merge, aes(Blue_ref, HLA.DQB1)) +           
+  geom_point(aes(color=Blue_ref)) +
+  scale_colour_gradientn(colours = hcl.colors(30, "Mako", rev = T)) +                                    
+  stat_smooth(method = "lm",
+              formula = y ~ x,
+              geom = "smooth") +
+  ylab("logcpm" ~ italic("HLA.DQB1")) +
+  xlab("% Blue Ancestry") +
+  theme_classic() +
+  NoLegend() +
+  labs(title = "Thai populations (N = 59)") +
+annotate(geom="text", x=0.5, y=10, label="logFC = 2.3187, adjusted P-value = 0.0326", color="black", size=2.5) + 
+theme(text = element_text(size = 14))
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_merge_HLA.DQB1
+```
+
+#5. Gene expression pattern per individual among AIDA samples
+#CD14+ Monocyte
+```{r}
+AIDA_ethnicity <- c("Thai", "Malay", "Chinese", "Indian", "Korean", "Japanese")
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono <- list()
+AIDA_Myeloid_pDC_metadata_perDCP_CD14mono <- list()
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_count <- list()
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_countdata <- list()
+gene_notlowlyExpressedGenes <- list()
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_DGE <- list()
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_DGE_TMM <- list()
+
+for (i in AIDA_ethnicity) {
+#Formatting inputs
+#perLibrary
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono[[i]] <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered, subset = Ethnicity == i & Author_Annotation == "CD14+_Monocyte")
+AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[[i]] <- select(Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono[[i]]@meta.data, Genotyping_ID, DCP_ID, Age, Sex, Author_Annotation, Blue_ref, Red_ref, Orange_ref) %>%
+distinct(DCP_ID, .keep_all = TRUE)  
+row.names(AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[[i]]) <- NULL
+AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[[i]]$DCP_ID <- gsub("_", "-", AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[[i]]$DCP_ID)
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_count[[i]] <- AggregateExpression(Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono[[i]], group.by = "DCP_ID", return.seurat = F)
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_countdata[[i]] <- as.matrix(Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_count[[i]][["RNA"]])
+gene_notlowlyExpressedGenes[[i]] <- rowSums(edgeR::cpm(Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_countdata[[i]]) > 0.5) >= 10
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_DGE[[i]] <- DGEList(Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_countdata[[i]][gene_notlowlyExpressedGenes[[i]], ])
+Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_DGE_TMM[[i]] <- calcNormFactors(Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_DGE[[i]])
+}
+
+AIDA_Blue_ethnicity <- c("Thai", "Malay", "Chinese")
+CD14mono_DCP_Blue_design <- list()
+bulk_CD14mono_Blue_DGE_TMM_vobjGenes <- list()
+bulk_CD14mono_Blue_DGE_TMM_vobjGenes_mtx <- list()
+bulk_CD14mono_Blue_DGE_TMM_vobjGenes_mtx_df <- list()
+AIDA_Myeloid_pDC_metadata_perDCP_Blue_CD14mono_merge <- list()
+for (i in AIDA_Blue_ethnicity){
+CD14mono_DCP_Blue_design[[i]] <- model.matrix(~ Sex + Blue_ref + Age, AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[[i]])
+bulk_CD14mono_Blue_DGE_TMM_vobjGenes[[i]] <- voom(Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_DGE_TMM[[i]], CD14mono_DCP_Blue_design[[i]])
+bulk_CD14mono_Blue_DGE_TMM_vobjGenes_mtx[[i]] <- as.matrix(bulk_CD14mono_Blue_DGE_TMM_vobjGenes[[i]])
+bulk_CD14mono_Blue_DGE_TMM_vobjGenes_mtx_df[[i]] <- data.frame(t(bulk_CD14mono_Blue_DGE_TMM_vobjGenes_mtx[[i]]))
+bulk_CD14mono_Blue_DGE_TMM_vobjGenes_mtx_df[[i]]$DCP_ID <- rownames(bulk_CD14mono_Blue_DGE_TMM_vobjGenes_mtx_df[[i]])
+AIDA_Myeloid_pDC_metadata_perDCP_Blue_CD14mono_merge[[i]] <- merge(bulk_CD14mono_Blue_DGE_TMM_vobjGenes_mtx_df[[i]], AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[[i]], by = "DCP_ID")
+}
+
+AIDA_Red_ethnicity <- c("Korean", "Japanese")
+CD14mono_DCP_Red_design <- list()
+bulk_CD14mono_Red_DGE_TMM_vobjGenes <- list()
+bulk_CD14mono_Red_DGE_TMM_vobjGenes_mtx <- list()
+bulk_CD14mono_Red_DGE_TMM_vobjGenes_mtx_df <- list()
+AIDA_Myeloid_pDC_metadata_perDCP_Red_CD14mono_merge <- list()
+for (i in AIDA_Red_ethnicity){
+CD14mono_DCP_Red_design[[i]] <- model.matrix(~ Sex + Red_ref + Age, AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[[i]])
+bulk_CD14mono_Red_DGE_TMM_vobjGenes[[i]] <- voom(Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_DGE_TMM[[i]], CD14mono_DCP_Red_design[[i]])
+bulk_CD14mono_Red_DGE_TMM_vobjGenes_mtx[[i]] <- as.matrix(bulk_CD14mono_Red_DGE_TMM_vobjGenes[[i]])
+bulk_CD14mono_Red_DGE_TMM_vobjGenes_mtx_df[[i]] <- data.frame(t(bulk_CD14mono_Red_DGE_TMM_vobjGenes_mtx[[i]]))
+bulk_CD14mono_Red_DGE_TMM_vobjGenes_mtx_df[[i]]$DCP_ID <- rownames(bulk_CD14mono_Red_DGE_TMM_vobjGenes_mtx_df[[i]])
+AIDA_Myeloid_pDC_metadata_perDCP_Red_CD14mono_merge[[i]] <- merge(bulk_CD14mono_Red_DGE_TMM_vobjGenes_mtx_df[[i]], AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[[i]], by = "DCP_ID")
+}
+
+#Orange
+CD14mono_DCP_Orange_design <- model.matrix(~ Sex + Orange_ref + Age, AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[["Indian"]])
+bulk_CD14mono_Orange_DGE_TMM_vobjGenes <- voom(Myeloid_pDC_merged_RPCA_joined_clustered_Ethnicity_CD14mono_DGE_TMM[["Indian"]], CD14mono_DCP_Orange_design)
+bulk_CD14mono_Orange_DGE_TMM_vobjGenes_mtx <- as.matrix(bulk_CD14mono_Orange_DGE_TMM_vobjGenes)
+bulk_CD14mono_Orange_DGE_TMM_vobjGenes_mtx_df <- data.frame(t(bulk_CD14mono_Orange_DGE_TMM_vobjGenes_mtx))
+bulk_CD14mono_Orange_DGE_TMM_vobjGenes_mtx_df$DCP_ID <- rownames(bulk_CD14mono_Orange_DGE_TMM_vobjGenes_mtx_df)
+AIDA_Myeloid_pDC_metadata_perDCP_Orange_CD14mono_merge <- merge(bulk_CD14mono_Orange_DGE_TMM_vobjGenes_mtx_df, AIDA_Myeloid_pDC_metadata_perDCP_CD14mono[["Indian"]], by = "DCP_ID")
+
+#Select only genes for comparison
+bulk_TH_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge <- select(AIDA_Myeloid_pDC_metadata_perDCP_Blue_CD14mono_merge[["Thai"]], DCP_ID, HLA.DQB1, C5AR1, MS4A7, LILRB1, IFITM2, ZNF217, GPNMB, E2F5, Blue_ref) %>%
+mutate(Ethnicity = case_when(startsWith(DCP_ID, "TH") ~ "Thai"))
+bulk_SG_Malay_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge <- select(AIDA_Myeloid_pDC_metadata_perDCP_Blue_CD14mono_merge[["Malay"]], DCP_ID, HLA.DQB1, C5AR1, MS4A7, LILRB1, IFITM2, ZNF217, GPNMB, E2F5, Blue_ref) %>%
+mutate(Ethnicity = case_when(startsWith(DCP_ID, "SG") ~ "SG_Malay"))
+bulk_SG_Chinese_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge <- select(AIDA_Myeloid_pDC_metadata_perDCP_Blue_CD14mono_merge[["Chinese"]], DCP_ID, HLA.DQB1, C5AR1, MS4A7, LILRB1, IFITM2, ZNF217, GPNMB, E2F5, Blue_ref) %>%
+mutate(Ethnicity = case_when(startsWith(DCP_ID, "SG") ~ "SG_Chinese"))
+bulk_SG_Indian_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge <- select(AIDA_Myeloid_pDC_metadata_perDCP_Orange_CD14mono_merge, DCP_ID, HLA.DQB1, C5AR1, MS4A7, LILRB1, IFITM2, ZNF217, GPNMB, E2F5, Blue_ref) %>%
+mutate(Ethnicity = case_when(startsWith(DCP_ID, "SG") ~ "SG_Indian"))
+bulk_Korean_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge <- select(AIDA_Myeloid_pDC_metadata_perDCP_Red_CD14mono_merge[["Korean"]], DCP_ID, HLA.DQB1, C5AR1, MS4A7, LILRB1, IFITM2, ZNF217, GPNMB, E2F5, Blue_ref) %>%
+mutate(Ethnicity = case_when(startsWith(DCP_ID, "KR") ~ "Korean"))
+bulk_Japanese_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge <- select(AIDA_Myeloid_pDC_metadata_perDCP_Red_CD14mono_merge[["Japanese"]], DCP_ID, HLA.DQB1, C5AR1, MS4A7, LILRB1, IFITM2, ZNF217, GPNMB, E2F5, Blue_ref) %>%
+mutate(Ethnicity = case_when(startsWith(DCP_ID, "JP") ~ "Japanese"))
+
+#Merge df
+All_AIDA_population_merge_genes <- rbind(bulk_TH_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge, bulk_SG_Malay_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge, bulk_SG_Chinese_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge,
+bulk_SG_Indian_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge,
+bulk_Korean_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge,
+bulk_Japanese_AIDA_Myeloid_pDC_metadata_perDCP_CD14mono_merge)
+```
+
+#6. Compare among AIDA populations
+#Fig. 3G
+```{r fig.height=4, fig.width=5}
+library(ggpubr)
+#Plotting
+All_AIDA_population_merge_HLA.DQB1_Ethnicity <- ggboxplot(All_AIDA_population_merge_genes, x="Ethnicity", y="HLA.DQB1", outlier.shape=NA, size=0.5) +
+geom_jitter(width = 0.08, size= 0.8, height=0, aes(color=Blue_ref)) +
+scale_colour_gradientn(colours = hcl.colors(30, "Mako", rev = T), name = "%Blue ancestry") +
+ylab("logcpm" ~ italic("HLA.DQB1")) +
+xlab("") +
+labs(title = "")  +
+coord_flip()
+All_AIDA_population_merge_HLA.DQB1_Ethnicity 
+```
+
+#4. Save image
+```{r}
+#Fig.3E
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part3_AIDA_MS/20260531/Fig.3E.pdf", width = 6, height = 7)
+# 2. Create a plot
+par(family = "Helvetica")
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_scaled_data_ht
+dev.off()
+
+#Fig.3F
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part3_AIDA_MS/20260531/Fig.3F.pdf", width = 3.5, height = 3.5)
+par(family = "Helvetica")
+bulk_TH_AIDA_CD14mono_integrated_passQC_DCP_DGE_vobjGenes_mtx_reorder_merge_HLA.DQB1
+dev.off()
+
+#Fig.3G
+pdf("/home/benjamaporn/AIDA/AIDA_Picture_manuscript/Part3_AIDA_MS/20260531/Fig.3G.pdf", width = 5, height = 5)
+par(family = "Helvetica")
+All_AIDA_population_merge_HLA.DQB1_Ethnicity
+dev.off()
+```
