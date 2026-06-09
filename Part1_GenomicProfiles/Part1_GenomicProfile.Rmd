@@ -1,0 +1,580 @@
+---
+title: "Part1_GenomicProfile_MSv1_20250519"
+output: html_document
+date: "2026-05-19"
+---
+
+#Ancestry Estimation based on AIDA and AADR
+#Principle Component Analysis
+```{r}
+#Read library
+library(tidyverse)
+library(readr)
+library(readxl)
+library(genio)
+```
+
+# 1. Read PLINK and PCA output for AIDA and AADR with their metadata
+```{r}
+Output_Path <- "/home/benjamaporn.sri/AIDA/postImputed_GSA2025/AIDA_AADR_Modern_HO_v62_autosome_updatedID_QC"
+#Global population
+AIDA_AADR_Global.fam <- read_fam(file.path(Output_Path, "/AIDA_merged_AADR_hg38_autosome_QC_overlappedSNPs_prunned_100win_0.3r2_pruned_remove_outlier.fam"))
+AIDA_AADR_Global_pca.eigenvec <- read_table(file.path(Output_Path, "/AIDA_merged_AADR_hg38_autosome_QC_overlappedSNPs_prunned_100win_0.3r2_pruned_remove_outlier_pca.eigenvec"), col_names = FALSE)
+AIDA_AADR_Global_pca.eigenval <- scan(file.path(Output_Path, "/AIDA_merged_AADR_hg38_autosome_QC_overlappedSNPs_prunned_100win_0.3r2_pruned_remove_outlier_pca.eigenval"))
+
+# Formatting the PCA data
+AIDA_AADR_Global_pca.eigenvec <- AIDA_AADR_Global_pca.eigenvec[,-1]
+names(AIDA_AADR_Global_pca.eigenvec) <- c("ind", paste0("PC", 1:(ncol(AIDA_AADR_Global_pca.eigenvec) - 1)))
+
+# Read metadata
+#AADR_v62_1240K_Modern
+AADR_v62_1240K_Modern.janno <- read_janno("/home/benjamaporn.sri/AIDA/preImputed_GSA2025/AADR_v62/AADR_v62_1240K_Modern.janno", to_janno = TRUE, validate = TRUE)
+AADR_v62_1240K_Modern.janno_df <- as.data.frame(AADR_v62_1240K_Modern.janno)
+AADR_v62_1240K_Modern.janno_df$Genotyping_ID <- paste(AADR_v62_1240K_Modern.janno_df$Group_Name, AADR_v62_1240K_Modern.janno_df$Poseidon_ID, sep = "_")
+AADR_v62_1240K_Modern.janno_df_select <- AADR_v62_1240K_Modern.janno_df %>% 
+  select(Genotyping_ID, Group_Name, Country) %>% 
+  rename("Self-reported ethnicity"="Group_Name")
+AADR_v62_1240K_Modern.janno_df_select$dataset <- "AADR"
+  
+#HO
+AADR_v62_HO.janno <- read_janno("/home/benjamaporn.sri/AIDA/preImputed_GSA2025/AADR_v62_HO/AADR_v62_HO_Modern_not_in_1240K.janno", to_janno = TRUE, validate = TRUE)
+AADR_v62_HO.janno_df <- as.data.frame(AADR_v62_HO_Modern_not_in_1240K.janno)
+AADR_v62_HO.janno_df$Genotyping_ID <- paste(AADR_v62_HO.janno_df$Group_Name, AADR_v62_HO.janno_df$Poseidon_ID, sep = "_")
+AADR_v62_HO.janno_df_select <- AADR_v62_HO.janno_df %>% 
+  select(Genotyping_ID, Group_Name, Country) %>%
+  rename("Self-reported ethnicity"="Group_Name")
+AADR_v62_HO.janno_df_select$dataset <- "AADR"
+
+#AIDA
+#Metadata for AIDA samples
+AIDA_DCP_Eth <- read_excel("/home/benjamaporn.sri/AIDA/GSA_analysis2024/Admixture_models/AIDA_ID_Ethnicity.xlsx")
+AIDA_DCP_Genotyping <- read_excel("/home/benjamaporn.sri/AIDA/GSA_analysis2024/Admixture_models/AIDA_DCP_GenotypingID.xlsx")
+AIDA_DCP_Eth_Genotyping <- merge(AIDA_DCP_Genotyping, AIDA_DCP_Eth, by="DCP_ID") %>%
+distinct(Genotyping_ID, .keep_all = TRUE)
+AIDA_DCP_Eth_Genotyping$dataset <- "AIDA"
+AIDA_DCP_Eth_Genotyping_select <- select(AIDA_DCP_Eth_Genotyping, Genotyping_ID, `Self-reported ethnicity`, Country, dataset)
+
+# Merge all metadata
+AIDA_merge_AADR_v62_1240K_Modern_HO_metadata <- rbind(AADR_v62_1240K_Modern.janno_df_select, AADR_v62_HO.janno_df_select, AIDA_DCP_Eth_Genotyping_select)
+
+#Match metadata with samples
+#Read Genetic ID of merged files
+AIDA_AADR_Global_genotypingID <- AIDA_AADR_Global.fam %>% rename("Genotyping_ID"="id")
+#Merge metadata of AADR+AIDA with merged.fam file
+AIDA_AADR_Global_metadata <- merge(AIDA_AADR_Global_genotypingID, AIDA_merge_AADR_v62_1240K_Modern_HO_metadata, by="Genotyping_ID")
+AIDA_AADR_Global_metadata$dataset_country <- paste(AIDA_AADR_Global_metadata$dataset, AIDA_AADR_Global_metadata$Country, sep = "_")
+AIDA_AADR_Global_metadata$dataset_country_eth <- paste(AIDA_AADR_Global_metadata$dataset_country, AIDA_AADR_Global_metadata$`Self-reported ethnicity`, sep = "_")
+
+#Add metadata
+names(AIDA_AADR_Global_metadata)[1] <- "ind" 
+AIDA_AADR_Global_pca.eigenvec_metadata <- merge(AIDA_AADR_Global_pca.eigenvec, AIDA_AADR_Global_metadata, by="ind", all.x = TRUE)
+```
+
+#2. Percentage Variance Explained (PVE)
+```{r}
+#Global populations
+AIDA_AADR_Global_pca.eigenval_pve <- data.frame(PC = 1:20, pve = AIDA_AADR_Global_pca.eigenval/sum(AIDA_AADR_Global_pca.eigenval)*100)
+#plot PVE
+ggplot(AIDA_AADR_Global_pca.eigenval_pve, aes(PC, pve)) + 
+  geom_bar(stat = "identity") + 
+  ylab("Percentage variance explained\n(global population)") + 
+  theme_light()
+
+#SAS-SEA-EAS populations
+AIDA_AADR_SAS_EAS_SEA_pca.eigenval_pve <- data.frame(PC = 1:20, pve = AIDA_AADR_SAS_EAS_SEA_pca.eigenval/sum(AIDA_AADR_SAS_EAS_SEA_pca.eigenval)*100)
+#plot PVE
+ggplot(AIDA_AADR_SAS_EAS_SEA_pca.eigenval_pve, aes(PC, pve)) + 
+  geom_bar(stat = "identity") + 
+  ylab("Percentage variance explained\n(SAS-SEA-EAS)") + 
+  theme_light()
+```
+
+#3. PCA analysis across global populations
+```{r}
+#Add geographical regions based on https://unstats.un.org/unsd/methodology/m49/
+#Taiwan (the Republic of China (ROC-numerical code 156 https://unstats.un.org/unsd/methodology/m49/))
+#Abkhazia as part of Georgia (not separated country from the UN)
+AIDA_AADR_Global_pca.eigenvec_metadata_geographical_regions <- AIDA_AADR_Global_pca.eigenvec_metadata %>% 
+mutate(sub_regions = case_when(
+  Country %in% c("Algeria", "Egypt", "Libya", "Morocco", "Western Sahara (Morocco)", "Sudan", "South Sudan", "Tunisia") ~ "Northern Africa", 
+  Country %in% c("Angola","Botswana or Namibia", "Cameroon", "Central African Republic", "Congo", "Gambia", "Kenya", "Lesotho", "Namibia", "Nigeria", "Senegal", "Sierra Leone", "South Africa", "Tanzania", "Eritrea", "Ethiopia",  "Malawi") ~ "Sub-Saharan Africa", 
+  Country %in% c("USA", "Canada") ~ "Northern America",
+  Country %in% c("Argentina", "Barbados", "Brazil", "Colombia", "Mexico", "Peru", "Puerto Rico", "Bolivia") ~ "Latin America & the Caribbean",
+  Country %in% c("Kazakhstan", "Kyrgyzstan", "Tajikistan", "Uzbekistan") ~ "Central Asia",
+  Country %in% c("China", "Taiwan", "Japan", "South Korea", "Mongolia") ~ "Eastern Asia",
+  Country %in% c("Thailand", "Myanmar", "Cambodia", "Singapore", "Indonesia", "Vietnam", "Philippines", "Brunei", "Laos") ~ "South-eastern Asia",
+  Country %in% c("India", "Nepal", "Pakistan", "Sri Lanka", "Bangladesh", "Iran") ~ "Southern Asia",
+  Country %in% c("Armenia", "Azerbaijan", "Georgia", "Abkhazia", "Iraq", "Israel", "Lebanon", "Saudi Arabia", "Syria", "Turkey", "United Arab Emirates", "Yemen", "Cyprus", "Jordan") ~ "Western Asia",
+  Country %in% c("Belarus", "Bulgaria","Czechia", "Hungary","Poland", "Moldova", "Romania", "Russia", "Ukraine") ~ "Eastern Europe",
+  Country %in% c("Estonia","Iceland", "Lithuania", "Norway", "United Kingdom", "Finland") ~ "Northern Europe",
+  Country %in% c("Albania", "Bosnia and Herzegovina","Croatia","Greece","Italy","Malta", "Montenegro", "North Macedonia", "Serbia", "Spain") ~ "Southern Europe",
+  Country %in% c("France") ~ "Western Europe",
+  Country %in% c("Australia", "New Zealand") ~ "Australia and New Zealand",
+  Country %in% c("Federated States of Micronesia") ~ "Micronesia",
+  Country %in% c("Papua New Guinea") ~ "Melanesia",
+  ))
+
+#plot population
+AIDA_AADR_Global_pca_populations <- AIDA_AADR_Global_pca.eigenvec_metadata_geographical_regions
+AIDA_AADR_Global_pca_populations$dataset_eth <- paste(AIDA_AADR_Global_pca_populations$dataset, AIDA_AADR_Global_pca_populations$`Self-reported ethnicity`, sep = "_")
+populations <- rep(NA, length(AIDA_AADR_Global_pca_populations$ind))
+populations[grep("Europe", AIDA_AADR_Global_pca_populations$sub_regions)] <- "EUR"
+populations[grep("Southern Asia", AIDA_AADR_Global_pca_populations$sub_regions)] <- "SAS"
+populations[grep("Western Asia", AIDA_AADR_Global_pca_populations$sub_regions)] <- "WAS"
+populations[grep("Central Asia", AIDA_AADR_Global_pca_populations$sub_regions)] <- "CAS"
+populations[grep("Eastern Asia", AIDA_AADR_Global_pca_populations$sub_regions)] <- "EAS"
+populations[grep("South-eastern Asia", AIDA_AADR_Global_pca_populations$sub_regions)] <- "SEA"
+populations[grep("Australia and New Zealand", AIDA_AADR_Global_pca_populations$sub_regions)] <- "OCE"
+populations[grep("Micronesia", AIDA_AADR_Global_pca_populations$sub_regions)] <- "OCE"
+populations[grep("Melanesia", AIDA_AADR_Global_pca_populations$sub_regions)] <- "OCE"
+populations[grep("Africa", AIDA_AADR_Global_pca_populations$sub_regions)] <- "AFR"
+populations[grep("America", AIDA_AADR_Global_pca_populations$sub_regions)] <- "AMR"
+populations[grep("AIDA_Japanese", AIDA_AADR_Global_pca_populations$dataset_eth)] <- "AIDA_Japanese"
+populations[grep("AIDA_Korean", AIDA_AADR_Global_pca_populations$dataset_eth)] <- "AIDA_Korean"
+populations[grep("AIDA_Thai", AIDA_AADR_Global_pca_populations$dataset_eth)] <- "AIDA_Thai"
+populations[grep("AIDA_SG_Malay", AIDA_AADR_Global_pca_populations$dataset_eth)] <- "AIDA_SG_Malay"
+populations[grep("AIDA_SG_Indian", AIDA_AADR_Global_pca_populations$dataset_eth)] <- "AIDA_SG_Indian"
+populations[grep("AIDA_SG_Chinese", AIDA_AADR_Global_pca_populations$dataset_eth)] <- "AIDA_SG_Chinese"
+populations[grep("AIDA_Indian", AIDA_AADR_Global_pca_populations$dataset_eth)] <- "AIDA_Indian"
+populations[grep("AIDA_European", AIDA_AADR_Global_pca_populations$dataset_eth)] <- "AIDA_European"
+AIDA_AADR_Global_pca_populations <- as_tibble(data.frame(AIDA_AADR_Global_pca_populations, populations))
+
+#populations for MS
+populations_col_dict <- c(EUR= "#6a51a3", WAS="#fecc5c", CAS="#f03b20", SAS="#fd8d3c", SEA="#41b6c4", EAS="#bd0026", AMR="#31a354", AFR="#006837", OCE="#00236b", AIDA_SG_Chinese="#EE1C25", AIDA_Indian="#a63603", AIDA_SG_Indian = "#FF671F", AIDA_SG_Malay="#377eb8", AIDA_Japanese="#9FBC5A", AIDA_Korean="#00BFC4", AIDA_Thai="#FF61CC", AIDA_European="#000a1e")
+#relevel
+AIDA_AADR_Global_pca_populations$dataset <- factor(AIDA_AADR_Global_pca_populations$dataset, levels = c("AIDA", "AADR"))
+AIDA_AADR_Global_pca_populations$populations <- factor(AIDA_AADR_Global_pca_populations$populations, levels = c("EUR", "AMR", "AFR",  "WAS", "SAS", "CAS", "EAS", "OCE", "SEA",  "AIDA_SG_Malay", "AIDA_SG_Chinese",  "AIDA_SG_Indian", "AIDA_Indian",  "AIDA_Japanese", "AIDA_Korean", "AIDA_Thai", "AIDA_European"))
+AIDA_AADR_Global_pca_ancestry_inference <- AIDA_AADR_Global_pca_populations %>% rename("Population" = "populations") %>% rename("Dataset" = "dataset")
+#ploting
+populations_AIDA_AADR_Modern_HO_removeOutlier_PCA <- ggplot(AIDA_AADR_Global_pca_ancestry_inference, aes(PC1, PC2, col = Population)) + geom_point(aes(shape=Dataset, color=Population, size=Dataset, fill = Population))+ 
+scale_shape_manual(values=c(25, 20))+ 
+scale_fill_manual(values=populations_col_dict)+ 
+scale_color_manual(values=populations_col_dict) +
+scale_size_manual(values=c(1.5,0.5)) +
+xlab(paste0("PC1 (", signif(AIDA_AADR_Global_pca.eigenval_pve$pve[1], 3), "%)")) + 
+ylab(paste0("PC2 (", signif(AIDA_AADR_Global_pca.eigenval_pve$pve[2], 3), "%)")) +
+guides(shape = guide_legend(override.aes = list(size=4)), fill = "none", colour = guide_legend(override.aes = list(size=4))) +
+coord_equal()+ 
+theme_light() + 
+theme(axis.text.x=element_text(angle=45,hjust=1, vjust=1), legend.text = element_text(size = 12), panel.grid = element_blank(), panel.border = element_rect(fill= "transparent"), text = element_text(size = 12, family = "Helvetica"))
+populations_AIDA_AADR_Modern_HO_removeOutlier_PCA
+
+#Zoom-in to Thai populations
+AIDA_AADR_Global_pca_ancestry_inference$dataset_country_eth <-  gsub(" *.HO","",AIDA_AADR_Global_pca_ancestry_inference$dataset_country_eth)
+AIDA_AADR_Global_pca_ancestry_inference$dataset_country_eth <-  gsub(" *.DG","",AIDA_AADR_Global_pca_ancestry_inference$dataset_country_eth)
+Thailand_AIDA_AADR_Modern_HO_removeOutlier_noLONZA <- filter(AIDA_AADR_Global_pca_ancestry_inference, Country == "Thailand" & Population != "AIDA_European")
+Thailand_AIDA_AADR_Modern_HO_removeOutlier_noLONZA$dataset_country_eth <- factor(Thailand_AIDA_AADR_Modern_HO_removeOutlier_noLONZA$dataset_country_eth, levels = c("AADR_Thailand_Karen_Sgaw", "AADR_Thailand_Lawa", "AADR_Thailand_Tai_Lue", "AADR_Thailand_Akha", "AADR_Thailand_Hmong", "AADR_Thailand_Htin_Mal", "AADR_Thailand_Mlabri", "AADR_Thailand_Mon", "AADR_Thailand_Nyah_Kur", "AADR_Thailand_Khmer", "AADR_Thailand_Kuy_Suay",  "AADR_Thailand_Maniq", "AADR_Thailand_Thai", "AIDA_Thailand_Thai"))
+
+TH_eth_col_dict <- c(AADR_Thailand_Karen_Sgaw="#ffffbf", AADR_Thailand_Lawa="#fee090", AADR_Thailand_Tai_Lue="#fdae61", AADR_Thailand_Akha="#f46d43", AADR_Thailand_Hmong="#d73027", AADR_Thailand_Htin_Mal="#a50026", AADR_Thailand_Mlabri="#313695",AADR_Thailand_Mon="#4575b4", AADR_Thailand_Nyah_Kur="#74add1", AADR_Thailand_Khmer="#4dac26", AADR_Thailand_Kuy_Suay="#b8e186",  AADR_Thailand_Maniq="black", AADR_Thailand_Thai="#d01c8b", AIDA_Thailand_Thai ="#E377C2")
+
+#Thai populations without Thai_Indian
+#No Thai_Indian for MS
+Thailand_AIDA_AADR_Modern_HO_removeOutlier_noLONZA_majorTH_PCA <- ggplot(filter(Thailand_AIDA_AADR_Modern_HO_removeOutlier_noLONZA, ind != "CD_22_13670_ETD_JRA_1"), aes(PC1, PC2, col = dataset_country_eth)) + 
+geom_point(size = 2, aes(shape=Dataset, color=dataset_country_eth, size=Dataset, fill = dataset_country_eth))+ 
+scale_shape_manual(values=c(25, 20))+ 
+scale_fill_manual(values=TH_eth_col_dict)+ 
+scale_color_manual(values=TH_eth_col_dict)+ 
+coord_equal() + 
+theme_light() + 
+xlab(paste0("PC1 (", signif(AIDA_AADR_Global_pca.eigenval_pve$pve[1], 3), "%)")) + 
+ylab(paste0("PC2 (", signif(AIDA_AADR_Global_pca.eigenval_pve$pve[2], 3), "%)")) + 
+theme(legend.text = element_text(size = 12), panel.grid = element_blank(), panel.border = element_rect(fill= "transparent"), text = element_text(size = 12, family = "Helvetica")) +
+labs(color = "Self-reported ethnicity")+
+guides(shape = guide_legend(override.aes = list(size=4)), fill="none", colour = guide_legend(override.aes = list(size=4)))
+Thailand_AIDA_AADR_Modern_HO_removeOutlier_noLONZA_majorTH_PCA
+
+#Subset SAS, EAS, SEA populations to do admixture
+AIDA_AADR_EAS_SAS_SEA_pca.eigenvec_metadata_geographical_regions_noLONZA <- filter(AIDA_AADR_Global_pca.eigenvec_metadata_geographical_regions, sub_regions %in% c("Eastern Asia", "Southern Asia", "South-eastern Asia") & `Self-reported ethnicity` != "European")
+AIDA_AADR_EAS_SAS_SEA_noLONZA_fam <- filter(AIDA_AADR_Global.fam, fam %in% AIDA_AADR_EAS_SAS_SEA_pca.eigenvec_metadata_geographical_regions_noLONZA$ind) %>% select(fam, id)
+write_tsv(AIDA_AADR_EAS_SAS_SEA_noLONZA_fam, file.path(Output_Path,  "/ADMIXTURE_analysis_SAS_EAS_SEA/Part1_Source_data_Github/AIDA_AADR_EAS_SAS_SEA_noLONZA_fam.txt"))
+AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata <- AIDA_AADR_EAS_SAS_SEA_pca.eigenvec_metadata_geographical_regions_noLONZA %>% select(ind, Country, dataset, dataset_country, dataset_country_eth, sub_regions)
+write_tsv(AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata, file.path(Output_Path,  "/ADMIXTURE_analysis_SAS_EAS_SEA/Part1_Source_data_Github/AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata.tsv"))
+```
+
+#4. PCA analysis across SAS-SEA-EAS populations
+```{r}
+#SAS_EAS_SEA
+AIDA_AADR_SAS_EAS_SEA_pca.eigenvec <- read_table(file.path(Output_Path, "/ADMIXTURE_analysis_SAS_EAS_SEA/AIDA_AADR_hg38_autosome_QC_pruned_remove_outlier_SAS_EAS_SEA_pca.eigenvec"), col_names = FALSE)
+AIDA_AADR_SAS_EAS_SEA_pca.eigenval <- scan(file.path(Output_Path, "/ADMIXTURE_analysis_SAS_EAS_SEA/AIDA_AADR_hg38_autosome_QC_pruned_remove_outlier_SAS_EAS_SEA_pca.eigenval"))
+
+# Formatting the PCA data
+AIDA_AADR_SAS_EAS_SEA_pca.eigenvec <- AIDA_AADR_SAS_EAS_SEA_pca.eigenvec[,-1]
+names(AIDA_AADR_SAS_EAS_SEA_pca.eigenvec) <- c("ind", paste0("PC", 1:(ncol(AIDA_AADR_SAS_EAS_SEA_pca.eigenvec) - 1)))
+#Add metadata
+AIDA_AADR_SAS_EAS_SEA_pca.eigenvec_metadata <- merge(AIDA_AADR_SAS_EAS_SEA_pca.eigenvec, AIDA_AADR_Global_metadata, by="ind", all.x = TRUE)
+AIDA_AADR_SAS_EAS_SEA_pca.eigenvec_metadata_geographical_regions <- AIDA_AADR_SAS_EAS_SEA_pca.eigenvec_metadata %>% 
+mutate(sub_regions = case_when(
+  Country %in% c("China", "Taiwan", "Japan", "South Korea", "Mongolia") ~ "EAS",
+  Country %in% c("Indonesia", "Philippines", "Brunei") ~ "ISEA",
+  Country %in% c("Thailand", "Myanmar", "Cambodia", "Singapore", "Vietnam", "Laos") ~ "MSEA",
+  Country %in% c("India", "Nepal", "Pakistan", "Sri Lanka", "Bangladesh", "Iran") ~ "SAS",
+  )) 
+
+#plot population
+AIDA_AADR_SAS_EAS_SEA_pca_populations <- AIDA_AADR_SAS_EAS_SEA_pca.eigenvec_metadata_geographical_regions
+AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset_eth <- paste(AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset, AIDA_AADR_SAS_EAS_SEA_pca_populations$`Self-reported ethnicity`, sep = "_")
+Populations_SAS_EAS_SEA <- rep(NA, length(AIDA_AADR_SAS_EAS_SEA_pca_populations$ind))
+Populations_SAS_EAS_SEA[grep("Iran", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Iran"
+Populations_SAS_EAS_SEA[grep("Pakistan", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Pakistan"
+Populations_SAS_EAS_SEA[grep("India", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "India"
+Populations_SAS_EAS_SEA[grep("Sri Lanka", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Sri Lanka"
+Populations_SAS_EAS_SEA[grep("Bangladesh", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Bangladesh"
+Populations_SAS_EAS_SEA[grep("Myanmar", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Myanmar"
+Populations_SAS_EAS_SEA[grep("Nepal", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Nepal"
+Populations_SAS_EAS_SEA[grep("Mongolia", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Mongolia"
+Populations_SAS_EAS_SEA[grep("China", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "China"
+Populations_SAS_EAS_SEA[grep("South Korea", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "South Korea"
+Populations_SAS_EAS_SEA[grep("Japan", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Japan"
+Populations_SAS_EAS_SEA[grep("Taiwan", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Taiwan"
+Populations_SAS_EAS_SEA[grep("Vietnam", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Vietnam"
+Populations_SAS_EAS_SEA[grep("Laos", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Laos"
+Populations_SAS_EAS_SEA[grep("Thailand", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Thailand"
+Populations_SAS_EAS_SEA[grep("Cambodia", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Cambodia"
+Populations_SAS_EAS_SEA[grep("Singapore", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Singapore_Malay"
+Populations_SAS_EAS_SEA[grep("Brunei", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Brunei"
+Populations_SAS_EAS_SEA[grep("Philippines", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Philippines"
+Populations_SAS_EAS_SEA[grep("Indonesia", AIDA_AADR_SAS_EAS_SEA_pca_populations$Country)] <- "Indonesia"
+Populations_SAS_EAS_SEA[grep("AIDA_Japanese", AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset_eth)] <- "AIDA_Japanese"
+Populations_SAS_EAS_SEA[grep("AIDA_Korean", AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset_eth)] <- "AIDA_Korean"
+Populations_SAS_EAS_SEA[grep("AIDA_Thai", AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset_eth)] <- "AIDA_Thai"
+Populations_SAS_EAS_SEA[grep("AIDA_SG_Malay", AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset_eth)] <- "AIDA_SG_Malay"
+Populations_SAS_EAS_SEA[grep("AIDA_SG_Indian", AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset_eth)] <- "AIDA_SG_Indian"
+Populations_SAS_EAS_SEA[grep("AIDA_SG_Chinese", AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset_eth)] <- "AIDA_SG_Chinese"
+Populations_SAS_EAS_SEA[grep("AIDA_Indian", AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset_eth)] <- "AIDA_Indian"
+AIDA_AADR_SAS_EAS_SEA_pca_populations <- as_tibble(data.frame(AIDA_AADR_SAS_EAS_SEA_pca_populations, Populations_SAS_EAS_SEA))
+
+#Relevel
+AIDA_AADR_SAS_EAS_SEA_pca_populations$sub_regions <- factor(AIDA_AADR_SAS_EAS_SEA_pca_populations$sub_regions, levels = c("SAS", "MSEA", "ISEA", "EAS"))
+AIDA_AADR_SAS_EAS_SEA_pca_populations$Country <- factor(AIDA_AADR_SAS_EAS_SEA_pca_populations$Country, levels = c("Iran", "Pakistan", "India", "Sri Lanka", "Bangladesh", "Myanmar", "Nepal", "Mongolia", "China", "South Korea", "Japan", "Taiwan", "Vietnam", "Laos", "Thailand", "Cambodia", "Singapore", "Brunei", "Philippines", "Indonesia"))
+AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset <- factor(AIDA_AADR_SAS_EAS_SEA_pca_populations$dataset, levels = c("AIDA", "AADR"))
+AIDA_AADR_SAS_EAS_SEA_pca_populations$Populations_SAS_EAS_SEA <- factor(AIDA_AADR_SAS_EAS_SEA_pca_populations$Populations_SAS_EAS_SEA, levels = c("Iran", "Pakistan", "India", "Sri Lanka", "Bangladesh", "Nepal", "Myanmar", "Laos", "Thailand","Cambodia","Vietnam", "Singapore_Malay", "Brunei", "Philippines", "Indonesia", "Mongolia", "South Korea", "Japan", "China", "Taiwan", "AIDA_Indian", "AIDA_SG_Indian", "AIDA_SG_Malay", "AIDA_SG_Chinese", "AIDA_Japanese", "AIDA_Korean", "AIDA_Thai"))
+
+Populations_SEA_SAS_EAS_col_dict <- c(Iran="#fee391", Pakistan="#fec44f", India="#fe9929", `Sri Lanka`="#d95f0e", Bangladesh="#993404", Nepal="#662501", Myanmar ="#ece2f0", Laos="#d0d1e6", Thailand="#a6bddb", Cambodia="#67a9cf", Vietnam = "#3690c0", Singapore_Malay="#02818a", Brunei="#c7e9c0", Philippines="#74c479", Indonesia="#006d2c", Mongolia="#fddbc7", `South Korea`="#ef6548", Japan="#d7301f", China="#b30000", Taiwan = "#ae017e",  AIDA_SG_Chinese="#EE1C25", AIDA_Indian="#a63603", AIDA_SG_Indian = "#FF671F", AIDA_SG_Malay="#377eb8", AIDA_Japanese="#9FBC5A", AIDA_Korean="#00BFC4", AIDA_Thai="#FF61CC")
+
+#ploting (multivariate t-distribution)
+Fig.1A_SAS_EAS_SEA <- ggplot(AIDA_AADR_SAS_EAS_SEA_pca_populations, aes(-PC1, PC2, color = Populations_SAS_EAS_SEA)) + 
+geom_point(size = 1.5, aes(shape=dataset, color=Populations_SAS_EAS_SEA, size=dataset))+ 
+scale_shape_manual(values=c(25, 20))  + 
+scale_color_manual(values=Populations_SEA_SAS_EAS_col_dict) +
+coord_equal() + 
+theme_light() + 
+xlab(paste0("-PC1 (", signif(AIDA_AADR_SAS_EAS_SEA_pca.eigenval_pve$pve[1], 3), "%)")) + 
+ylab(paste0("PC2 (", signif(AIDA_AADR_SAS_EAS_SEA_pca.eigenval_pve$pve[2], 3), "%)")) + 
+theme(axis.text.x=element_text(angle=45,hjust=1, vjust=1), legend.text = element_text(size = 12), text = element_text(size = 12, family = "Helvetica"), plot.title = element_text(size=12, face="bold"), panel.grid = element_blank(), panel.border = element_rect(fill= "transparent"))+
+labs(color = "Population", shape="Dataset", fill="Region")+
+guides(shape = guide_legend(override.aes = list(size=5)), colour = guide_legend(override.aes = list(size=5), ncol = 1)) +
+stat_ellipse(data = subset(AIDA_AADR_SAS_EAS_SEA_pca_populations, sub_regions == "SAS"), color = "#fd8d3c", type = "t", level = 0.95, linetype = 1) +
+stat_ellipse(data = subset(AIDA_AADR_SAS_EAS_SEA_pca_populations, sub_regions == "MSEA"), color = "#41b6c4", type = "t", level = 0.95, linetype = 1) +
+stat_ellipse(data = subset(AIDA_AADR_SAS_EAS_SEA_pca_populations, sub_regions == "ISEA"), color = "#31a354", type = "t", level = 0.95, linetype = 1) +
+stat_ellipse(data = subset(AIDA_AADR_SAS_EAS_SEA_pca_populations, sub_regions == "EAS"), color = "#bd0026", type = "t", level = 0.95, linetype = 1) +
+stat_ellipse(data = subset(AIDA_AADR_SAS_EAS_SEA_pca_populations, Populations_SAS_EAS_SEA == "AIDA_Thai"), color = "#FF61CC", type = "t", level = 0.95, linetype = 2) +
+labs(title = "PCA across SAS, SEA, and EAS populations", caption = "Clustering with multivariate t-distribution")
+Fig.1A_SAS_EAS_SEA 
+```
+
+#5. Save images
+```{r fig.height=12, fig.width=10}
+#Fig. 1A
+ggsave(Fig.1A_SAS_EAS_SEA, file = "/home/benjamaporn.sri/AIDA/Part1_MS_Figure/20260523/Fig.1A.pdf", width = 8, height = 9, dpi = 300) 
+```
+
+#Admixture Estimation
+```{r}
+#Read library
+library(genio)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(data.table)
+library(tidyverse)
+library(janno)
+```
+
+# 1. ADMIXTURE analysis of SAS-EAS-SEA-AIDA with equal sample size of each ethnicity
+```{r}
+#EAS, SAS, SEA and AIDA --> just to prove of concept
+AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata$dataset_country_eth <-  gsub("*.HO","",AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata$dataset_country_eth)
+AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata$dataset_country_eth <-  gsub("*.DG","",AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata$dataset_country_eth)
+
+#Checked no. of samples per ethnicity
+AIDA_AADR_EAS_SAS_SEA_noLONZA_noSuffix_nsample_eth <- AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata %>% group_by(dataset_country_eth) %>%
+summarise(n_sample = n_distinct(ind))
+#Ploting
+ggplot(AIDA_AADR_EAS_SAS_SEA_noLONZA_noSuffix_nsample_eth, aes(reorder(dataset_country_eth, n_sample), n_sample)) +
+  geom_bar(stat="identity") + ylab("no. of individuals") + 
+  theme_light() + coord_flip()+
+  geom_text(aes(label = n_sample), vjust = 1, size = 3, col = "red")
+
+#random 5 samples of each eth to do admixture
+AIDA_AADR_EAS_SAS_SEA_noLONZA_noSuffix_nsample_eth_morethan4 <- filter(AIDA_AADR_EAS_SAS_SEA_noLONZA_noSuffix_nsample_eth, n_sample > 4)
+set.seed(123)
+AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata_5random <- filter(AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata, dataset_country_eth %in% AIDA_AADR_EAS_SAS_SEA_noLONZA_noSuffix_nsample_eth_morethan4$dataset_country_eth) %>% group_by(dataset_country_eth) %>% sample_n(5, replace = FALSE)
+#Select randomly five samples for ADMIXTURE run
+AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata_5random_fam <- filter(AIDA_AADR_Global.fam, fam %in% AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata_5random$ind) %>% select(fam, id)
+write_tsv(AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata_5random_fam, file.path(Output_Path,  "/ADMIXTURE_analysis_SAS_EAS_SEA_sampling/Part1_Source_data_Github/AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata_5random_fam.txt")) 
+#Metadata
+AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata_5random_metadata <- AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata_5random %>% select(ind, Country, dataset, dataset_country, dataset_country_eth, sub_regions)
+write_tsv(AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata_5random_metadata, file.path(Output_Path,  "/ADMIXTURE_analysis_SAS_EAS_SEA_sampling/Part1_Source_data_Github/AIDA_AADR_EAS_SAS_SEA_noLONZA_metadata_5random_metadata.tsv"))
+
+#SAS-EAS-SEA-AIDA sampling
+Admixture_CV_error_SAS_EAS_SEA_sampling_20250805 <-read_xlsx(file.path(Output_Path, "/ADMIXTURE_analysis_SAS_EAS_SEA_sampling/Admixture_CV_error_SAS_EAS_SEA_sampling_20250805.xlsx"))
+
+#Downsampling
+Fig.S2_Admixture_CV_error_SAS_EAS_SEA_sampling_sample_size <- ggplot(Admixture_CV_error_SAS_EAS_SEA_sampling_20250805, aes(x=K, y=CV_error_sampling)) +
+  geom_line(linetype = "dashed")+
+  geom_point()+
+  ylab("cross-validation error")+
+  xlab("K")+
+  scale_x_continuous(breaks = c(1:12))+
+  theme_classic()+
+  labs(caption = "Five SAS-EAS-SEA samples per ethnicity in AIDA and AADR")
+
+#ADMIXTURE outputs
+AIDA_AADR_hg38_autosome_QC_pruned_remove_outlier_SAS_EAS_SEA_sampling.fam <- read_fam(file.path(Output_Path, "/ADMIXTURE_analysis_SAS_EAS_SEA_sampling/AIDA_AADR_hg38_autosome_QC_pruned_remove_outlier_SAS_EAS_SEA_sampling.fam"))
+AIDA_AADR_hg38_autosome_QC_pruned_remove_outlier_SAS_EAS_SEA_sampling.fam <- AIDA_AADR_hg38_autosome_QC_pruned_remove_outlier_SAS_EAS_SEA_sampling.fam %>% rename("ind"="id")
+AIDA_merged_AADR_hg38_autosome_EAS_SAS_SEA_populations_noLONZA_5random_metadata <- read_tsv(file.path(Output_Path, "/ADMIXTURE_analysis_SAS_EAS_SEA_sampling/AIDA_merged_AADR_hg38_autosome_EAS_SAS_SEA_populations_noLONZA_5random_metadata.tsv"))
+#read in all ten runs and save each dataframe in a list
+AIDA_AADR_SAS_EAS_SEA_sampling_k_runs <- list()
+#read in log files
+for (i in 1:12){
+  AIDA_AADR_SAS_EAS_SEA_sampling_k_runs[[i]] <- read.table(file.path(Output_Path, paste0("/ADMIXTURE_analysis_SAS_EAS_SEA_sampling/AIDA_AADR_hg38_autosome_QC_pruned_remove_outlier_SAS_EAS_SEA_sampling.", i, ".Q")))
+}
+
+#Processing Admixture models at the lowest CV (k=3)
+#Keep Genotyping_ID as same as fam file
+AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmixtureTable_k3 <- cbind(AIDA_AADR_SAS_EAS_SEA_sampling_k_runs[[3]], AIDA_AADR_hg38_autosome_QC_pruned_remove_outlier_SAS_EAS_SEA_sampling.fam)
+AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmWithPopGroups_k3 <- merge(AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmixtureTable_k3, AIDA_merged_AADR_hg38_autosome_EAS_SAS_SEA_populations_noLONZA_5random_metadata, by="ind") 
+AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmWithPopGroups_k3$dataset_country_eth <- factor(AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmWithPopGroups_k3$dataset_country_eth, levels = c("AADR_Iran_Iran_Fars", "AADR_Iran_Iran_Zoroastrian", "AADR_Iran_Iranian_Bandari", "AADR_Iran_Iranian", "AADR_Iran_Jew_Iranian", "AADR_Pakistan_Balochi", "AADR_Pakistan_Brahui",  "AADR_Pakistan_Makrani", "AADR_Pakistan_Pathan", "AADR_Pakistan_Sindhi_Pakistan","AADR_Pakistan_PJL", "AADR_Pakistan_Kalash",  "AADR_India_ITU", "AADR_India_Jew_Cochin", "AIDA_India_Indian", "AIDA_Singapore_SG_Indian",  "AADR_Sri Lanka_STU", "AADR_Bangladesh_BEB", "AADR_Pakistan_Burusho", "AADR_China_Uyghur", "AADR_Pakistan_Hazara",  "AADR_China_Kazakh_China", "AADR_China_Kyrgyz_China", "AADR_Mongolia_Mongol", "AADR_China_Daur", "AADR_China_Oroqen", "AADR_China_Hezhen", "AADR_China_Mongola",  "AADR_China_Tibetan",  "AADR_China_Xibo", "AADR_China_Yugur", "AADR_China_Bonan", "AADR_China_Dongxiang", "AADR_China_Salar", "AADR_China_Tu", "AADR_Nepal_Gurung", "AADR_Nepal_Magar", "AADR_Nepal_Rai", "AADR_Nepal_Tamang", "AADR_Nepal_Kusunda", "AADR_Nepal_Tharu", "AADR_Myanmar_Burmese",  "AIDA_Singapore_SG_Malay", "AADR_Singapore_Malay", "AADR_Thailand_Maniq", "AADR_Indonesia_Indonesia_Flores_Bena", "AADR_Indonesia_Indonesia_Flores_Cibol", "AADR_Indonesia_Indonesia_Flores_Rampasasa", "AADR_Indonesia_Indonesia_Java_Dieng", "AADR_Indonesia_Indonesia_Sulawesi_Kajang", "AADR_Indonesia_Indonesia_Sulawesi_Mandar",  "AADR_Indonesia_Indonesia_Sumatra_Toba", "AADR_Philippines_Tagalog", "AADR_Cambodia_Cambodian", "AADR_Laos_Lao",  "AIDA_Thailand_Thai", "AADR_Thailand_Tai_Lue", "AADR_Thailand_Lawa", "AADR_Thailand_Karen_Sgaw", "AADR_Thailand_Mon", "AADR_Thailand_Thai", "AADR_Thailand_Nyah_Kur", "AADR_Thailand_Khmer", "AADR_Thailand_Kuy_Suay", "AADR_Thailand_Mlabri", "AADR_Thailand_Htin_Mal", "AADR_Indonesia_Indonesia_Borneo_Maanyan", "AADR_Indonesia_Indonesia_Mentawai", "AADR_Indonesia_Indonesia_Nias_Hilitobara", "AADR_Brunei_Murut", "AADR_Brunei_Dusun", "AADR_Philippines_Kankanaey", "AADR_Taiwan_Ami",  "AADR_Taiwan_Atayal","AADR_China_Maonan", "AADR_China_CDX", "AADR_China_Dai", "AADR_Vietnam_KHV", "AADR_Vietnam_Vietnamese", "AADR_China_Gelao", "AADR_China_Zhuang",  "AADR_China_Mulam", "AADR_China_China_Lahu", "AADR_China_Dong", "AADR_Thailand_Hmong", "AADR_Thailand_Akha", "AADR_China_She", "AIDA_Singapore_SG_Chinese",  "AADR_China_Han", "AADR_China_Miao", "AADR_China_CHS", "AADR_China_Tujia", "AADR_China_CHB", "AADR_China_Naxi", "AADR_China_Yi", "AADR_China_Qiang", "AADR_South Korea_Korean", "AIDA_South Korea_Korean", "AADR_Japan_JPT", "AADR_Japan_Japanese", "AIDA_Japan_Japanese"))
+
+#specify cluster (predict population) in each V
+AIDA_AADR_SAS_EAS_SEA_sampling_pop_names <- c("EAS", "SAS", "SEA")
+AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmWithPopGroups_k3_rename <- setnames(AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmWithPopGroups_k3, old = c("V1", "V2", "V3"), new = AIDA_AADR_SAS_EAS_SEA_sampling_pop_names) 
+
+#ordering
+AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3 <- AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmWithPopGroups_k3_rename[order(AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmWithPopGroups_k3_rename$dataset_country_eth, -AIDA_AADR_SAS_EAS_SEA_sampling_mergedAdmWithPopGroups_k3_rename$EAS),]
+```
+
+#2. Visualization ADMIXTURE of sampling samples
+```{r fig.height=12, fig.width=50}
+#Visualization
+pop_col_k3 <- c("EAS"="#bd0026", "SAS"="#fd8d3c", "SEA"="#41b6c4")
+AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3_xlabels <- aggregate(1:nrow(AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3),
+                    by = list(AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3[, "dataset_country_eth"]),
+                    FUN = mean)
+AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3_xlabels
+#borders of the groups
+AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3_sampleEdges <- aggregate(1:nrow(AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3),
+                        by = list(AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3[, "dataset_country_eth"]), 
+                        FUN = max)
+AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3_sampleEdges
+#Plotting
+par(mar=c(30, 4, 4, 0))
+barplot(t(as.matrix(AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3[,2:4])), col=pop_col_k3, 
+        space = 0, ylab = "Ancestry", cex.axis = 1.5,
+        border=NA, axisnames = FALSE, legend = FALSE, cex.lab=1.5)
+abline(v = AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3_sampleEdges$x, lwd = 2)
+axis(1, at = AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3_xlabels$x - 0.4, labels = AIDA_AADR_SAS_EAS_SEA_sampling_pop_ordered_k3_xlabels$Group.1, cex.axis = 1.5, las=2)
+title("k = 3", adj = 0, cex.main=2.5)
+```
+
+# 3. ADMIXTURE analysis of SAS-EAS-SEA-AIDA of populations with at least 5 samples per each ethnicity
+```{r}
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast.fam <- read_fam(file.path(Output_Path, "/ADMIXTURE_analysis_SAS_EAS_SEA_AIDA_sampling_eth_5atleast/AIDA_merged_AADR_hg38_autosome_EAS_SAS_SEA_populations_noLONZA_eth_5atleast.fam"))
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast.fam <- AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast.fam %>% rename("ind"="id")
+
+#Metadata
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_metadata <- read_tsv(file.path(Output_Path, "/ADMIXTURE_analysis_SAS_EAS_SEA_AIDA_sampling_eth_5atleast/AIDA_merged_AADR_hg38_autosome_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_metadata.tsv"))
+
+#Read in all ADMIXTURE runs and save each dataframe in a list
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_k_runs <- list()
+#read in log files
+for (i in 1:12){
+  AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_k_runs[[i]] <- read.table(file.path(Output_Path, paste0("/ADMIXTURE_analysis_SAS_EAS_SEA_AIDA_sampling_eth_5atleast/AIDA_merged_AADR_hg38_autosome_EAS_SAS_SEA_populations_noLONZA_eth_5atleast.", i, ".Q")))
+}
+
+#Processing Admixture models (k=3)
+#Keep Genotyping_ID as same as fam file
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_k_runs_k3 <- cbind(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_k_runs[[3]], AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast.fam)
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3 <- merge(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_k_runs_k3, AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_metadata, by="ind") 
+
+#Reorder
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3$dataset_country_eth <- factor(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3$dataset_country_eth, levels = c("AADR_Iran_Iran_Fars", "AADR_Iran_Iran_Zoroastrian", "AADR_Iran_Iranian_Bandari", "AADR_Iran_Iranian", "AADR_Iran_Jew_Iranian", "AADR_Pakistan_Balochi", "AADR_Pakistan_Brahui",  "AADR_Pakistan_Makrani", "AADR_Pakistan_Pathan", "AADR_Pakistan_Sindhi_Pakistan","AADR_Pakistan_PJL", "AADR_Pakistan_Kalash",  "AADR_India_ITU", "AADR_India_Jew_Cochin", "AIDA_India_Indian", "AIDA_Singapore_SG_Indian",  "AADR_Sri Lanka_STU", "AADR_Bangladesh_BEB", "AADR_Pakistan_Burusho", "AADR_China_Uyghur", "AADR_Pakistan_Hazara",  "AADR_China_Kazakh_China", "AADR_China_Kyrgyz_China", "AADR_Mongolia_Mongol", "AADR_China_Daur", "AADR_China_Oroqen", "AADR_China_Hezhen", "AADR_China_Mongola",  "AADR_China_Tibetan",  "AADR_China_Xibo", "AADR_China_Yugur", "AADR_China_Bonan", "AADR_China_Dongxiang", "AADR_China_Salar", "AADR_China_Tu", "AADR_Nepal_Gurung", "AADR_Nepal_Magar", "AADR_Nepal_Rai", "AADR_Nepal_Tamang", "AADR_Nepal_Kusunda", "AADR_Nepal_Tharu", "AADR_Myanmar_Burmese",  "AIDA_Singapore_SG_Malay", "AADR_Singapore_Malay", "AADR_Thailand_Maniq", "AADR_Indonesia_Indonesia_Flores_Bena", "AADR_Indonesia_Indonesia_Flores_Cibol", "AADR_Indonesia_Indonesia_Flores_Rampasasa", "AADR_Indonesia_Indonesia_Java_Dieng", "AADR_Indonesia_Indonesia_Sulawesi_Kajang", "AADR_Indonesia_Indonesia_Sulawesi_Mandar",  "AADR_Indonesia_Indonesia_Sumatra_Toba", "AADR_Philippines_Tagalog", "AADR_Cambodia_Cambodian", "AADR_Laos_Lao",  "AIDA_Thailand_Thai", "AADR_Thailand_Tai_Lue", "AADR_Thailand_Lawa", "AADR_Thailand_Karen_Sgaw", "AADR_Thailand_Mon", "AADR_Thailand_Thai", "AADR_Thailand_Nyah_Kur", "AADR_Thailand_Khmer", "AADR_Thailand_Kuy_Suay", "AADR_Thailand_Mlabri", "AADR_Thailand_Htin_Mal", "AADR_Indonesia_Indonesia_Borneo_Maanyan", "AADR_Indonesia_Indonesia_Mentawai", "AADR_Indonesia_Indonesia_Nias_Hilitobara", "AADR_Brunei_Murut", "AADR_Brunei_Dusun", "AADR_Philippines_Kankanaey", "AADR_Taiwan_Ami",  "AADR_Taiwan_Atayal","AADR_China_Maonan", "AADR_China_CDX", "AADR_China_Dai", "AADR_Vietnam_KHV", "AADR_Vietnam_Vietnamese", "AADR_China_Gelao", "AADR_China_Zhuang",  "AADR_China_Mulam", "AADR_China_China_Lahu", "AADR_China_Dong", "AADR_Thailand_Hmong", "AADR_Thailand_Akha", "AADR_China_She",  "AADR_China_Han", "AIDA_Singapore_SG_Chinese", "AADR_China_Miao", "AADR_China_CHS", "AADR_China_Tujia", "AADR_China_CHB", "AADR_China_Naxi", "AADR_China_Yi", "AADR_China_Qiang", "AADR_South Korea_Korean", "AIDA_South Korea_Korean", "AADR_Japan_JPT", "AADR_Japan_Japanese", "AIDA_Japan_Japanese"))
+
+#Processing Admixture models (k=3) 
+#specify cluster (population) in each V
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_pop_names <- c("MSEA", "SAS", "EAS")
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_rename <- setnames(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3, old = c("V1", "V2", "V3"), new = AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_pop_names) 
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_rename <- AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_rename[, c("ind", "EAS", "SAS", "MSEA", "fam", "pat", "mat", "sex", "pheno", "Country", "dataset", "dataset_country", "dataset_country_eth", "sub_regions")]
+
+#ordering
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3 <-AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_rename[order(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_rename$dataset_country_eth, -AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_rename$EAS),]
+```
+
+```{r fig.height=12, fig.width=70}
+#Visualization
+pop_col_k3_5atleast <- c("EAS"="#bd0026", "SAS"="#fd8d3c", "MSEA"= "#41b6c4")
+#Cluster
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_xlabels <- aggregate(1:nrow(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3),
+                    by = list(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3[, "dataset_country_eth"]),
+                    FUN = mean)
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_xlabels
+#borders of the groups
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_sampleEdges <- aggregate(1:nrow(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3),
+                        by = list(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3[, "dataset_country_eth"]), 
+                        FUN = max)
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_sampleEdges
+#Plotting:https://www.dataanalytics.org.uk/legends-on-graphs-and-charts/#legend
+par(mar=c(30, 6, 6, 0))
+barplot(t(as.matrix(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3[,2:4])), col=pop_col_k3_5atleast, 
+        space = 0, ylab = "Ancestry", cex.axis = 2,
+        border=NA, axisnames = FALSE, legend = FALSE, cex.lab=2)
+abline(v = AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_sampleEdges$x, lwd = 2)
+axis(1, at = AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_xlabels$x - 0.4, labels = AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_xlabels$Group.1, cex.axis = 0.7, las=2)
+title("k = 3" , adj = 0, cex.main=3)
+```
+#4. Visualization ADMIXTURE of only AIDA
+```{r fig.height=10, fig.width=30}
+onlyAIDA_ADMIXTURE_pop_ordered_k3 <- filter(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3, dataset == "AIDA") %>% 
+mutate(dataset_eth = case_when(
+  dataset_country_eth == "AIDA_India_Indian" ~ "AIDA_Indian",
+  dataset_country_eth == "AIDA_Singapore_SG_Indian" ~ "AIDA_SG_Indian",
+  dataset_country_eth == "AIDA_Singapore_SG_Malay" ~ "AIDA_SG_Malay",
+  dataset_country_eth == "AIDA_Thailand_Thai" ~ "AIDA_Thai",
+  dataset_country_eth == "AIDA_Singapore_SG_Chinese" ~ "AIDA_SG_Chinese",
+  dataset_country_eth == "AIDA_South Korea_Korean" ~ "AIDA_Korean",
+  dataset_country_eth == "AIDA_Japan_Japanese" ~ "AIDA_Japanese"
+  )) 
+
+#Cluster
+onlyAIDA_ADMIXTURE_pop_ordered_k3_xlabels <- aggregate(1:nrow(onlyAIDA_ADMIXTURE_pop_ordered_k3),
+                    by = list(onlyAIDA_ADMIXTURE_pop_ordered_k3[, "dataset_eth"]),
+                    FUN = mean)
+onlyAIDA_ADMIXTURE_pop_ordered_k3_xlabels
+#borders of the groups
+onlyAIDA_ADMIXTURE_pop_ordered_k3_sampleEdges <- aggregate(1:nrow(onlyAIDA_ADMIXTURE_pop_ordered_k3),
+                        by = list(onlyAIDA_ADMIXTURE_pop_ordered_k3[, "dataset_eth"]), 
+                        FUN = max)
+onlyAIDA_ADMIXTURE_pop_ordered_k3_sampleEdges
+
+#Plotting
+par(mar=c(20, 6, 6, 0))
+barplot(t(as.matrix(onlyAIDA_ADMIXTURE_pop_ordered_k3[,2:4])), col=pop_col_k3_5atleast, 
+        space = 0, ylab = "Ancestry", cex.axis = 2,
+        border=NA, axisnames = FALSE, legend = FALSE, cex.lab=2)
+abline(v = onlyAIDA_ADMIXTURE_pop_ordered_k3_sampleEdges$x, lwd = 2)
+axis(1, at = onlyAIDA_ADMIXTURE_pop_ordered_k3_xlabels$x - 0.4, labels = onlyAIDA_ADMIXTURE_pop_ordered_k3_xlabels$Group.1, cex.axis = 1.5, las=2)
+title("AIDA at k = 3", adj = 0, cex.main=2)
+```
+#5. Calculating Shannon Entropy
+```{r}
+library(TFBSTools)
+#Calculate average ancestral composition
+#AIDA and MSEA
+cohort_AIDA_MSEA_ancestry <- unique(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3$dataset_country_eth)
+AIDA_MSEA_ancestry_pop_ordered_k3_cohort_select <- list()
+AIDA_MSEA_ancestry_pop_ordered_k3_cohort_average_component <- list()
+AIDA_MSEA_ancestry_pop_ordered_k3_cohort_shannon_entropy <- list()
+#Calculate Shannon entropy
+for (i in cohort_AIDA_MSEA_ancestry){
+  AIDA_MSEA_ancestry_pop_ordered_k3_cohort_select[[i]] <- filter(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3, dataset_country_eth == i) %>% 
+  select("EAS", "SAS", "MSEA")
+  AIDA_MSEA_ancestry_pop_ordered_k3_cohort_average_component[[i]] <- colMeans(AIDA_MSEA_ancestry_pop_ordered_k3_cohort_select[[i]])
+  AIDA_MSEA_ancestry_pop_ordered_k3_cohort_shannon_entropy[[i]] <- shannon.entropy(AIDA_MSEA_ancestry_pop_ordered_k3_cohort_average_component[[i]])
+}
+
+#Save supplememtary ouputs
+AIDA_MSEA_ancestry_pop_ordered_k3_cohort_average_component_df <- t(data.frame(AIDA_MSEA_ancestry_pop_ordered_k3_cohort_average_component))
+AIDA_MSEA_ancestry_pop_ordered_k3_cohort_shannon_entropy_df <- t(data.frame(AIDA_MSEA_ancestry_pop_ordered_k3_cohort_shannon_entropy))
+TableS1_AIDA_MSEA_ancestry_shannon_entropy <- merge(AIDA_MSEA_ancestry_pop_ordered_k3_cohort_average_component_df, AIDA_MSEA_ancestry_pop_ordered_k3_cohort_shannon_entropy_df,
+                          by = 'row.names', all = TRUE) %>%
+  rename("Ethnicity" = "Row.names") %>%
+  rename("Shannon Entropy" = "V1") 
+
+#AIDA by country
+AIDA_dataset_country <- c("AIDA_Singapore", "AIDA_Thailand", "AIDA_South Korea", "AIDA_Japan")
+AIDA_country_pop_ordered_k3_cohort_select <- list()
+AIDA_country_pop_ordered_k3_cohort_average_component <- list()
+AIDA_country_pop_ordered_k3_cohort_shannon_entropy <- list()
+#Calculate Shannon entropy
+for (i in AIDA_dataset_country){
+  AIDA_country_pop_ordered_k3_cohort_select[[i]] <- filter(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3, dataset_country == i) %>% 
+  select("EAS", "SAS", "MSEA")
+  AIDA_country_pop_ordered_k3_cohort_average_component[[i]] <- colMeans(AIDA_country_pop_ordered_k3_cohort_select[[i]])
+  AIDA_country_pop_ordered_k3_cohort_shannon_entropy[[i]] <- shannon.entropy(AIDA_country_pop_ordered_k3_cohort_average_component[[i]])
+}
+```
+
+#6. ADMIXTURE Map
+```{r}
+#Add longtitude data
+AADR_v62_1240K_Modern_HO_metadata_SAS_EAS_SEA_geography_long_lat <- read_tsv("/home/benjamaporn.sri/AIDA/preImputed_GSA2025/AIDA_preIMP/AADR_v62_1240K_Modern_HO_metadata_SAS_EAS_SEA_geography_long_lat.tsv")
+AADR_v62_1240K_Modern_HO_metadata_SAS_EAS_SEA_noNA_geography_long_lat <- read_tsv("/home/benjamaporn.sri/AIDA/preImputed_GSA2025/AIDA_preIMP/AADR_v62_1240K_Modern_HO_metadata_SAS_EAS_SEA_noNA_geography_long_lat.tsv")
+
+AADR_v62_1240K_Modern_HO_metadata_SAS_EAS_SEA_noNA_geography_long_lat <- AADR_v62_1240K_Modern_HO_metadata_SAS_EAS_SEA_noNA_geography_long_lat %>% rename("ind"="Genotyping_ID")
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_long_lat_noNA <- merge(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3,  AADR_v62_1240K_Modern_HO_metadata_SAS_EAS_SEA_noNA_geography_long_lat, by="ind")
+
+#Arrange
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_long_lat_noNA_reorder <- AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_long_lat_noNA %>% arrange(Longitude)
+
+#Only AIDA and MSEA Populations with their Ancestry at k = 3
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_AIDA_MSEA_ancestry <- filter(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3, dataset_country_eth %in% cohort_AIDA_MSEA_ancestry)
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_AIDA_MSEA_ancestry_long_lat_noNA <- merge(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_AIDA_MSEA_ancestry, AADR_v62_1240K_Modern_HO_metadata_SAS_EAS_SEA_noNA_geography_long_lat, by="ind")
+```
+
+```{r fig.height=9, fig.width=10}
+library(mapmixture)
+#Read in admixture file format
+#All samples that have long and lat
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_long_lat_noNA_admixture <-   AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_long_lat_noNA %>% select(dataset_country_eth, ind, SAS, MSEA, EAS)
+#Read in coordinates file
+AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_long_lat_noNA_coordinates <- AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_long_lat_noNA %>% select(dataset_country_eth, Latitude, Longitude) %>%
+distinct(dataset_country_eth, .keep_all = TRUE)
+
+#Plotting
+All_AADR_map <- mapmixture(AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_long_lat_noNA_admixture, AIDA_AADR_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_mergedAdmWithPopGroups_k3_long_lat_noNA_coordinates, crs = 4326,  cluster_cols = c("#fd8d3c", "#41b6c4", "#bd0026"),cluster_names = c("SAS","MSEA","EAS"), land_colour = "white", 
+plot_title = "Admixture Map across SAS, SEA, and EAS Populations from AADR (N=1,716) with AIDA Study Sites", 
+arrow = TRUE, arrow_size = 1.5, arrow_position = "bl", pie_size = 1, pie_border = 0.3, 
+scalebar = TRUE, scalebar_size = 2, scalebar_position = "tl",
+plot_title_size = 12, axis_title_size = 12, axis_text_size = 12) + 
+theme(legend.position = "bottom", legend.text = element_text(size = 9), text = element_text(size = 9, family = "Helvetica")) +
+guides(fill = "none")+
+annotate("label", x = 88, y = 22, label = "AIDA_Indian",size = 2, colour = "#a63603") +
+annotate("label", x = 108, y = 6, label = "AIDA_SG_Chinese",size = 2, colour = "#EE1C25")+
+annotate("label", x = 109, y = 4, label = "AIDA_SG_Malay",size = 2, colour = "#377eb8") +
+annotate("label", x = 110, y = 2, label = "AIDA_SG_Indian",size = 2, colour = "#FF671F") +
+annotate("label", x = 95, y = 14, label = "AIDA_Thai",size = 3, colour = "#FF61CC", fontface="bold") +
+annotate("label", x = 130, y = 36, label = "AIDA_Korean",size = 2, colour = "#00BFC4") +
+annotate("label", x = 140, y = 35, label = " AIDA_Japanese",size = 2, colour = "#9FBC5A")
+All_AADR_map
+```
+
+#7. Save images and file
+```{r}
+#Images
+#ADMIXTURE Map
+ggsave(All_AADR_map, file = "/home/benjamaporn.sri/AIDA/Part1_MS_Figure/20260523/Fig.1B.pdf", width = 12, height = 9, dpi = 300)
+
+#ADMIXTURE of only AIDA
+# Open a pdf file
+pdf("/home/benjamaporn.sri/AIDA/Part1_MS_Figure/20260523/Fig.1C.pdf", width = 30, height = 10) 
+# 2. Create a plot
+par(family = "Helvetica")
+par(mar=c(20, 6, 4, 0))
+barplot(t(as.matrix(onlyAIDA_ADMIXTURE_pop_ordered_k3[,2:4])), col=pop_col_k3_5atleast, 
+        space = 0, ylab = "Ancestry", cex.axis = 2,
+        border=NA, axisnames = FALSE, legend = FALSE, cex.lab=2)
+abline(v = onlyAIDA_ADMIXTURE_pop_ordered_k3_sampleEdges$x, lwd = 2)
+axis(1, at = onlyAIDA_ADMIXTURE_pop_ordered_k3_xlabels$x - 0.4, labels = onlyAIDA_ADMIXTURE_pop_ordered_k3_xlabels$Group.1, cex.axis = 2, las=2)
+title("AIDA at k = 3", adj = 0, cex.main=2.5)
+# Close the pdf file
+dev.off()
+
+#Files
+#Ancestry component at k=3 from imputed data matched with references 
+AIDA_AADR_EAS_SAS_SEA_Ancestry <- onlyAIDA_ADMIXTURE_pop_ordered_k3 %>% select(ind, EAS, SAS, MSEA, Country, dataset_eth)
+write_tsv(AIDA_AADR_EAS_SAS_SEA_Ancestry, file.path(Output_Path, "/ADMIXTURE_analysis_SAS_EAS_SEA_AIDA_sampling_eth_5atleast/Part1_Source_data_Github/AIDA_merged_AADR_hg38_autosome_EAS_SAS_SEA_populations_noLONZA_eth_5atleast_pop_ordered_k3_onlyAIDA_select.tsv"))
+
+#Table S1
+write_tsv(TableS1_AIDA_MSEA_ancestry_shannon_entropy,  "/home/benjamaporn.sri/AIDA/Part1_MS_Figure/20260523/TableS1_AIDA_MSEA_ancestry_shannon_entropy.tsv")
+```
