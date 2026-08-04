@@ -1,0 +1,218 @@
+#Load required library
+```{r}
+library(Seurat)
+library(SeuratData)
+library(SeuratWrappers)
+library(Azimuth)
+library(ggplot2)
+library(patchwork)
+options(future.globals.maxSize = 150e9)
+``` 
+
+#Cell Type specific integration for visualization and DEGs
+#1. Read files
+```{r}
+#Read files
+#AIDA
+Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples <- readRDS("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples.rds")
+#NK
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK <- readRDS("/home/benjamaporn/AIDA/GEX/AIDA_GEX/Celltypes/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK.RDS")
+#T
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T <- readRDS("/home/benjamaporn/AIDA/GEX/AIDA_GEX/Celltypes/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T.RDS")
+#B 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B <- readRDS("/home/benjamaporn/AIDA/GEX/AIDA_GEX/Celltypes/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B.RDS")
+#Plasma cells
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Plasma_Cell <- readRDS("/home/benjamaporn/AIDA/GEX/AIDA_GEX/Celltypes/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Plasma_Cell.RDS")
+```
+
+#2. Formatting seurat data
+```{r}
+#Metadata of unrelated Samples
+AIDA_unrelated_samples_metadata <- Step03_Integration_integrated_PBMC_after_CellTypeSpecificQC_celltype_4level_July2024_AIDA_admix_ref_GSA_unrelated_samples@meta.data
+rownames(AIDA_unrelated_samples_metadata) <- AIDA_unrelated_samples_metadata$barcode_name
+
+#NK
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_unrelated_samples <- subset(x = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK, subset = barcode_name %in% AIDA_unrelated_samples_metadata$barcode_name) 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_unrelated_samples_metadata <- AddMetaData(
+  object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_unrelated_samples,
+  metadata = AIDA_unrelated_samples_metadata
+)
+
+#T
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_unrelated_samples <- subset(x = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T, subset = barcode_name %in% AIDA_unrelated_samples_metadata$barcode_name) 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_unrelated_samples_metadata <- AddMetaData(
+  object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_unrelated_samples,
+  metadata = AIDA_unrelated_samples_metadata
+)
+
+#B
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_unrelated_samples <- subset(x = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B, subset = barcode_name %in% AIDA_unrelated_samples_metadata$barcode_name) 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_unrelated_samples_metadata <- AddMetaData(
+  object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_unrelated_samples,
+  metadata = AIDA_unrelated_samples_metadata
+)
+
+#Plasma cells
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Plasma_Cell_unrelated_samples <- subset(x = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Plasma_Cell, subset = barcode_name %in% AIDA_unrelated_samples_metadata$barcode_name) 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Plasma_Cell_unrelated_samples_metadata <- AddMetaData(
+  object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Plasma_Cell_unrelated_samples,
+  metadata = AIDA_unrelated_samples_metadata
+)
+```
+
+#3. Sample QC
+```{r}
+#No IN and sample with cell < 800 cells
+DCP_ID_more800_ID <- AIDA_unrelated_samples_metadata %>%
+  group_by(DCP_ID) %>% 
+  summarise(n_cell = n_distinct(barcode_name)) %>% 
+  filter(n_cell>800)
+
+#checked
+DCP_ID_less800_ID_related_LONZA_excluded <- subset(AIDA_unrelated_samples_metadata, !(DCP_ID %in% unique(DCP_ID_more800_ID$DCP_ID)))
+
+#subset seurat object
+#NK
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_unrelated_samples_QC_samples <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_unrelated_samples_metadata, subset = DCP_ID %in% DCP_ID_more800_ID$DCP_ID)
+#T
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_unrelated_samples_QC_samples <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_unrelated_samples_metadata, subset = DCP_ID %in% DCP_ID_more800_ID$DCP_ID)
+#NK+T
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_T_unrelated_samples_QC_samples_list <- list(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_unrelated_samples_QC_samples, AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_unrelated_samples_QC_samples)
+
+#B and Plasma cells
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_unrelated_samples_QC_samples <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_unrelated_samples_metadata, subset = DCP_ID %in% DCP_ID_more800_ID$DCP_ID)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Plasma_Cell_unrelated_samples_QC_samples <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Plasma_Cell_unrelated_samples_metadata, subset = DCP_ID %in% DCP_ID_more800_ID$DCP_ID)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_unrelated_samples_QC_samples_list <- list(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_unrelated_samples_QC_samples, AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Plasma_Cell_unrelated_samples_QC_samples)
+```
+
+#4. NK+ILC integration
+```{r}
+#Filter only NK and ILC based on Author Annotation of both NK and T objects
+#Merge only CD16+NK, CD56+NK, NK unknown and ILC based on Author Annotation of both NK and T rds files
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_T_merged <- merge(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_T_unrelated_samples_QC_samples_list[[1]], AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_T_unrelated_samples_QC_samples_list[[2]])
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_T_merged, subset = Author_Annotation %in% c("CD16+_NK", "CD56+_NK", "NK_unknown", "ILC"))
+
+# convert a v3 assay to a v5 assay: https://satijalab.org/seurat/articles/seurat5_integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC[["RNA"]] <- as(object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC[["RNA"]], Class = "Assay5")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC[["RNA"]] <- split(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC[["RNA"]], f = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC$Library)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC, ".../NK_ILC_integration/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC.rds")
+
+#Follow https://satijalab.org/seurat/articles/seurat5_integration
+#Read files
+Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202511/NK_ILC_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC <-  readRDS(file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC.rds"))
+
+#Before Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC <- NormalizeData(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC <- FindVariableFeatures(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC <- ScaleData(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC <- RunPCA(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC <- FindNeighbors(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC, dims = 1:30, reduction = "pca")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_unintegrated <- FindClusters(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC, resolution = 2, cluster.name = "unintegrated_clusters")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_unintegrated, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_unintegrated.rds"))
+
+#RPCA Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA <- IntegrateLayers(object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_unintegrated, method = RPCAIntegration, orig.reduction = "pca", new.reduction = "integrated.rpca", verbose = FALSE)
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA.rds"))
+
+#For Visualization
+#Before Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_unintegrated_clustered <- RunUMAP(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_unintegrated, dims = 1:30, reduction = "pca")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_unintegrated_clustered, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_unintegrated_clustered.rds"))
+
+#RPCA
+#Re-join layers after integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA[["RNA"]] <- JoinLayers(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA[["RNA"]])
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA <- FindNeighbors(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA, reduction = "integrated.rpca", dims = 1:30)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA <- FindClusters(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA, resolution = 2, cluster.name = "rpca_clusters")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA_joined_clustered <- RunUMAP(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA, reduction = "integrated.rpca", dims = 1:30)
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA_joined_clustered, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA_joined_clustered.rds"))
+```
+
+#5. T integration
+```{r}
+#Merge T cells based on Author Annotation of both NK and T rds files
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_T_merged, subset = Author_Annotation %in% c("CD8+_T_GZMBhi", "CD8+_T_unknown", "gdT_GZMBhi", "T_unknown", "CD8+_T_GZMKhi", "CD4+_T_unknown", "CD4+_T_cyt", "gdT_GZMKhi", "CD8+_T_naive",  "MAIT", "CD4+_T_cm", "CD4+_T_naive", "CD4+_T_em", "Treg", "dnT"))
+
+# convert a v3 assay to a v5 assay: https://satijalab.org/seurat/articles/seurat5_integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC[["RNA"]] <- as(object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC[["RNA"]], Class = "Assay5")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC[["RNA"]] <- split(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC[["RNA"]], f = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC$Library)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC, ".../T_integration/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC.rds")
+
+#Follow https://satijalab.org/seurat/articles/seurat5_integration
+#Read files
+Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202511/T_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC <-  readRDS(file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC.rds"))
+
+#Before Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC <- NormalizeData(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC <- FindVariableFeatures(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC <- ScaleData(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC <- RunPCA(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC <- FindNeighbors(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC, dims = 1:30, reduction = "pca")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_unintegrated <- FindClusters(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC, resolution = 2, cluster.name = "unintegrated_clusters")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_unintegrated, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_unintegrated.rds"))
+
+#RPCA
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA <- IntegrateLayers(object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_unintegrated, method = RPCAIntegration, orig.reduction = "pca", new.reduction = "integrated.rpca", verbose = FALSE)
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA.rds"))
+
+#For Visualization
+#Before Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_unintegrated_clustered <- RunUMAP(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_unintegrated, dims = 1:30, reduction = "pca")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_unintegrated_clustered, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_unintegrated_clustered.rds"))
+
+#RPCA
+#Re-join layers after integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA[["RNA"]] <- JoinLayers(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA[["RNA"]])
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA <- FindNeighbors(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA, reduction = "integrated.rpca", dims = 1:30)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA <- FindClusters(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA, resolution = 2, cluster.name = "rpca_clusters")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA_joined_clustered <- RunUMAP(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA, reduction = "integrated.rpca", dims = 1:30)
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA_joined_clustered, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA_joined_clustered.rds"))
+```
+
+#6. B+Plasma Cells integration
+```{r}
+#Merge B and Plasma Cells into a subject after QC
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC <- merge(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_unrelated_samples_QC_samples_list[[1]], AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_unrelated_samples_QC_samples_list[[2]])
+
+#convert a v3 assay to a v5 assay: https://satijalab.org/seurat/articles/seurat5_integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC[["RNA"]] <- as(object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC[["RNA"]], Class = "Assay5")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC[["RNA"]] <- split(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC[["RNA"]], f = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC$Library)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC, "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202511/B_PlasmaCell_integration/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC.rds")
+
+#Follow https://satijalab.org/seurat/articles/seurat5_integration
+#Read files
+Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202511/B_PlasmaCell_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC <-  readRDS(file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC.rds"))
+
+#Before Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC <- NormalizeData(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC <- FindVariableFeatures(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC <- ScaleData(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC <- RunPCA(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC <- FindNeighbors(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC, dims = 1:30, reduction = "pca")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_unintegrated <- FindClusters(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC, resolution = 2, cluster.name = "unintegrated_clusters")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_unintegrated, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_unintegrated.rds"))
+
+#RPCA
+#reduce weight due to low number of cells in B and Plasma cells
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA <- IntegrateLayers(object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_unintegrated, method = RPCAIntegration, orig.reduction = "pca", new.reduction = "integrated.rpca", k.weight = 50, verbose = FALSE)
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA.rds"))
+
+#For Visualization
+#Before Integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_unintegrated_clustered <- RunUMAP(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_unintegrated, dims = 1:30, reduction = "pca")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_unintegrated_clustered, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_unintegrated_clustered.rds"))
+
+#RPCA
+#Re-join layers after integration
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA[["RNA"]] <- JoinLayers(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA[["RNA"]])
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA <- FindNeighbors(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA, reduction = "integrated.rpca", dims = 1:30)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA <- FindClusters(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA, resolution = 2, cluster.name = "rpca_clusters")
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA_joined_clustered <- RunUMAP(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA, reduction = "integrated.rpca", dims = 1:30)
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA_joined_clustered, file.path(Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA_joined_clustered.rds"))
+```
