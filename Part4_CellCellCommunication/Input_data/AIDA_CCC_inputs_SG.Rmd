@@ -1,0 +1,170 @@
+#SG populations
+#Load required library
+```{r}
+library(SeuratDisk)
+library(Seurat)
+library(scCustomize)
+library(scater)
+```
+
+#1.Read DEGs results from Dream analyis
+```{r}
+#SG outputs 
+SG_Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202603/Part4_AIDA_Age_Sex_DEGs_Output/SG_AIDA"
+SG_AIDA_Myeloid_pDC_dream_modelFit_eBayes <- readRDS(file.path(SG_Output_PATH, "/SG_AIDA_Myeloid_pDC_dream_modelFit_eBayes.rds"))
+SG_AIDA_NK_dream_modelFit_eBayes <- readRDS(file.path(SG_Output_PATH, "/SG_AIDA_NK_dream_modelFit_eBayes.rds"))
+SG_AIDA_T_dream_modelFit_eBayes <- readRDS(file.path(SG_Output_PATH, "/SG_AIDA_T_dream_modelFit_eBayes.rds"))
+SG_AIDA_B_dream_modelFit_eBayes <- readRDS(file.path(SG_Output_PATH, "/SG_AIDA_B_dream_modelFit_eBayes.rds"))
+```
+
+#Immune Cell types of interest
+```{r}
+Myeloid_pDC_Author_Annotation_celltype <- c("Myeloid_unknown", "CD14+_Monocyte", "CD16+_Monocyte", "cDC2")
+NK_Author_Annotation_celltype <- c("NK_unknown", "CD16+_NK", "CD56+_NK")
+T_Author_Annotation_celltype <- c("T_unknown", "CD4+_T_unknown", "CD4+_T_naive", "CD4+_T_cm",  "CD4+_T_cyt", "CD4+_T_em", "CD8+_T_unknown", "CD8+_T_naive", "CD8+_T_GZMBhi", "CD8+_T_GZMKhi", "MAIT",   "gdT_GZMBhi", "gdT_GZMKhi",  "Treg")
+B_Author_Annotation_celltype <- c("B_unknown", "naive_B", "memory_B_IGHMlo", "memory_B_IGHMhi")
+```
+
+#Prepare input for CCC analysis
+#2.DEGs impacted by Blue ancestry in SG
+```{r}
+#Only upregulated genes by Blue ancestry
+#Myeloid_pDC
+SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref <- list()
+SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed <- list()
+SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_UP <- list()
+for (i in Myeloid_pDC_Author_Annotation_celltype) {
+  SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref[[i]] <- topTable(SG_AIDA_Myeloid_pDC_dream_modelFit_eBayes[[i]], coef = "Blue_ref", adjust="BH", number = Inf) 
+  SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref[[i]]$Author_Annotation <- i
+  SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed[[i]] <- data.frame(SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref[[i]]) %>%  
+  mutate(diffexpressed = case_when(logFC > 1 & adj.P.Val < 0.05 ~ "Upregulated", 
+                                   logFC < -1 & adj.P.Val < 0.05 ~ "Downregulated",
+                                   TRUE ~ "Not significant"))
+  SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_UP[[i]] <- subset(SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_diffexpressed[[i]], diffexpressed == "Upregulated")
+  SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_UP[[i]]$gene <- rownames(SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_UP[[i]])
+}
+
+#NK
+SG_AIDA_NK_dream_modelFit_Blue_ref <- list()
+SG_AIDA_NK_dream_modelFit_Blue_ref_diffexpressed <- list()
+SG_AIDA_NK_dream_modelFit_Blue_ref_UP <- list()
+for (i in NK_Author_Annotation_celltype) {
+  SG_AIDA_NK_dream_modelFit_Blue_ref[[i]] <- topTable(SG_AIDA_NK_dream_modelFit_eBayes[[i]], coef = "Blue_ref", adjust="BH", number = Inf) 
+  SG_AIDA_NK_dream_modelFit_Blue_ref[[i]]$Author_Annotation <- i
+  SG_AIDA_NK_dream_modelFit_Blue_ref_diffexpressed[[i]] <- data.frame(SG_AIDA_NK_dream_modelFit_Blue_ref[[i]]) %>%
+    mutate(diffexpressed = case_when(logFC > 1 & adj.P.Val < 0.05 ~ "Upregulated", 
+                                     logFC < -1 & adj.P.Val < 0.05 ~ "Downregulated",
+                                TRUE ~ "Not significant"))
+  SG_AIDA_NK_dream_modelFit_Blue_ref_UP[[i]] <- subset(SG_AIDA_NK_dream_modelFit_Blue_ref_diffexpressed[[i]], diffexpressed == "Upregulated")
+  SG_AIDA_NK_dream_modelFit_Blue_ref_UP[[i]]$gene <- rownames(SG_AIDA_NK_dream_modelFit_Blue_ref_UP[[i]])
+}
+
+#T
+SG_AIDA_T_dream_modelFit_Blue_ref <- list()
+SG_AIDA_T_dream_modelFit_Blue_ref_diffexpressed <- list()
+SG_AIDA_T_dream_modelFit_Blue_ref_UP <- list()
+for (i in T_Author_Annotation_celltype) {
+  SG_AIDA_T_dream_modelFit_Blue_ref[[i]] <- topTable(SG_AIDA_T_dream_modelFit_eBayes[[i]], coef = "Blue_ref", adjust="BH", number = Inf) 
+  SG_AIDA_T_dream_modelFit_Blue_ref[[i]]$Author_Annotation <- i
+  SG_AIDA_T_dream_modelFit_Blue_ref_diffexpressed[[i]] <- data.frame(SG_AIDA_T_dream_modelFit_Blue_ref[[i]]) %>%  
+  mutate(diffexpressed = case_when(logFC > 1 & adj.P.Val < 0.05 ~ "Upregulated", 
+                                   logFC < -1 & adj.P.Val < 0.05 ~ "Downregulated",
+                                   TRUE ~ "Not significant"))
+  SG_AIDA_T_dream_modelFit_Blue_ref_UP[[i]] <- subset(SG_AIDA_T_dream_modelFit_Blue_ref_diffexpressed[[i]], diffexpressed == "Upregulated")
+  SG_AIDA_T_dream_modelFit_Blue_ref_UP[[i]]$gene <- rownames(SG_AIDA_T_dream_modelFit_Blue_ref_UP[[i]])
+}
+
+#B
+SG_AIDA_B_dream_modelFit_Blue_ref <- list()
+SG_AIDA_B_dream_modelFit_Blue_ref_diffexpressed <- list()
+SG_AIDA_B_dream_modelFit_Blue_ref_UP <- list()
+for (i in B_Author_Annotation_celltype) {
+  SG_AIDA_B_dream_modelFit_Blue_ref[[i]] <- topTable(SG_AIDA_B_dream_modelFit_eBayes[[i]], coef = "Blue_ref", adjust="BH", number = Inf) 
+  SG_AIDA_B_dream_modelFit_Blue_ref[[i]]$Author_Annotation <- i
+  SG_AIDA_B_dream_modelFit_Blue_ref_diffexpressed[[i]] <- data.frame(SG_AIDA_B_dream_modelFit_Blue_ref[[i]]) %>%  
+  mutate(diffexpressed = case_when(logFC > 1 &   adj.P.Val < 0.05 ~ "Upregulated", 
+                                   logFC < -1 & adj.P.Val < 0.05 ~ "Downregulated",
+                                   TRUE ~ "Not significant"))
+  SG_AIDA_B_dream_modelFit_Blue_ref_UP[[i]] <- subset(SG_AIDA_B_dream_modelFit_Blue_ref_diffexpressed[[i]], diffexpressed == "Upregulated")
+  SG_AIDA_B_dream_modelFit_Blue_ref_UP[[i]]$gene <- rownames(SG_AIDA_B_dream_modelFit_Blue_ref_UP[[i]])
+}
+```
+
+```{r}
+#Merge all cell types of upregulated DEGs by Blue ancestry in the Thai populations
+SG_UPdge_Blue_ref_All_celltypes_df <- rbind(SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_UP[["Myeloid_unknown"]], SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_UP[["CD14+_Monocyte"]], SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_UP[["CD16+_Monocyte"]], SG_AIDA_Myeloid_pDC_dream_modelFit_Blue_ref_UP[["cDC2"]], SG_AIDA_NK_dream_modelFit_Blue_ref_UP[["NK_unknown"]],
+SG_AIDA_NK_dream_modelFit_Blue_ref_UP[["CD16+_NK"]], SG_AIDA_NK_dream_modelFit_Blue_ref_UP[["CD56+_NK"]],
+SG_AIDA_T_dream_modelFit_Blue_ref_UP[["T_unknown"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["CD4+_T_unknown"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["CD4+_T_naive"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["CD4+_T_cm"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["CD4+_T_cyt"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["CD4+_T_em"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["CD8+_T_unknown"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["CD8+_T_naive"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["CD8+_T_GZMBhi"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["CD8+_T_GZMKhi"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["MAIT"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["gdT_GZMBhi"]], SG_AIDA_T_dream_modelFit_Blue_ref_UP[["gdT_GZMKhi"]], SG_AIDA_B_dream_modelFit_Blue_ref_UP[["naive_B"]], SG_AIDA_B_dream_modelFit_Blue_ref_UP[["memory_B_IGHMlo"]])
+
+SG_UPdge_Blue_ref_All_celltypes_df_select <- select(SG_UPdge_Blue_ref_All_celltypes_df, Author_Annotation, gene, logFC, P.Value, adj.P.Val)
+rownames(SG_UPdge_Blue_ref_All_celltypes_df_select) <- NULL
+
+#save DEGs files
+write_tsv(SG_UPdge_Blue_ref_All_celltypes_df, file = "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202607/CCC/SG_UPdge_Blue_ref_All_celltypes_df.tsv")
+write_tsv(SG_UPdge_Blue_ref_All_celltypes_df_select, file = "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202607/CCC/SG_UPdge_Blue_ref_All_celltypes_df_select.tsv")
+```
+
+#3.Normalized count data per cell
+```{r}
+#SG outputs 
+#Read files
+#Myeloid + pDC
+Myeloid_pDC_Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202510/myeloid_pDC_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered <- readRDS(file.path(Myeloid_pDC_Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered.rds"))
+#NK
+NK_ILC_Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202511/NK_ILC_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA_joined_clustered <- readRDS(file.path(NK_ILC_Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA_joined_clustered.rds"))
+#T
+T_Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202511/T_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA_joined_clustered <- readRDS(file.path(T_Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA_joined_clustered.rds"))
+#B and Plasma Cells
+B_PlasmaCell_Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2025/Analysis202511/B_PlasmaCell_integration"
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA_joined_clustered <- readRDS(file.path(B_PlasmaCell_Output_PATH, "/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA_joined_clustered.rds"))
+
+#Using normalized count matrix 
+AIDA_normGEX_Output_PATH <- "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202607/CCC"
+
+#Myeloid_pDC cells in SG 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered_SG <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered, subset = Country == "SG")
+#NK cells in SG 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA_joined_clustered_SG <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA_joined_clustered, subset = Country == "SG")
+#T cells in SG 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA_joined_clustered_SG <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA_joined_clustered, subset = Country == "SG")
+#B cells in SG 
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_QC_RPCA_joined_clustered_SG <- subset(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_Plasma_Cell_QC_RPCA_joined_clustered, subset = Country == "SG")
+
+#Merge all Seurat objects
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged <- merge(x = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_Myeloid_pDC_merged_RPCA_joined_clustered_SG, y = list(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_NK_ILC_QC_RPCA_joined_clustered_SG, AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_T_QC_RPCA_joined_clustered_SG, AIDA_Phase1_DataFreeze_v2_Step03_Seurat_JPKRSGTH_B_QC_RPCA_joined_clustered_SG))
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined <- JoinLayers(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged)
+
+DefaultAssay(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined)
+Layers(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined[["RNA"]])
+
+#Prepare data
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707 <- UpdateSeuratObject(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707 <- Add_Cell_QC_Metrics(object = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707, species = "human")
+
+#single cell experiment
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_sce <- as.SingleCellExperiment(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707, assay = "RNA")
+saveRDS(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_sce, "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202606/CCC/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_sce.rds")
+
+#save anndata
+Sys.setenv(RETICULATE_PYTHON = "/home/benjamaporn/miniconda3/bin/python3")
+library(reticulate)
+library(anndata)
+as.anndata(x = AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707, file_path = AIDA_normGEX_Output_PATH, file_name = "AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_anndata.h5ad")
+```
+
+#4.Create metadata
+```{r}
+library(tidyverse)
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_meta <- AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707@meta.data
+
+#for CCC analysis
+AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_meta_select <- select(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_meta, barcode_name, Author_Annotation)
+rownames(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_meta_select) <- NULL
+
+#save
+write_tsv(AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_meta_select, file = "/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202607/CCC/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_meta_select.tsv")
+```
+
