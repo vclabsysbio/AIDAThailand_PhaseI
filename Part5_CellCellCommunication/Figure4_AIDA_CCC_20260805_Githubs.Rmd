@@ -1,0 +1,354 @@
+#Visualization
+#Cell-cell communication analysis 
+```{r}
+library(ktplots)
+library(SingleCellExperiment)
+library(ggplot2)
+```
+
+#1.Ancestry
+```{r}
+#Read sce inputs
+TH_adata_sce <- readRDS("/home/benjamaporn.sri/CCC_analysis/TH_AIDA/CCC/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_TH_merged_joined_20260701_sce.rds")
+SG_adata_sce <- readRDS("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202606/CCC/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_SG_merged_joined_20260707_sce.rds")
+KR_adata_sce <- readRDS("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202606/CCC/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_KR_merged_joined_20260721_sce.rds")
+JP_adata_sce <- readRDS("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202606/CCC/AIDA_Phase1_DataFreeze_v2_Step03_Seurat_Allcelltypes_JP_merged_joined_20260721_sce.rds")
+
+#Read upregulated gene list by ancestry
+TH_UPdge_Blue_ref_All_celltypes_df_select <- read.delim("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202606/CCC/TH_UPdge_Blue_ref_All_celltypes_df_select.tsv")
+SG_UPdge_Blue_ref_All_celltypes_df_select <- read.delim("//mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202607/CCC/SG_UPdge_Blue_ref_All_celltypes_df_select.tsv")
+KR_UPdge_Red_ref_All_celltypes_df_select <- read.delim("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202607/CCC/KR_UPdge_Red_ref_All_celltypes_df_select.tsv")
+JP_UPdge_Red_ref_All_celltypes_df_select <- read.delim("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202607/CCC/JP_UPdge_Red_ref_All_celltypes_df_select.tsv")
+
+
+#CellPhoneDB outputs
+CellPhoneDB_Output <- "/home/benjamaporn.sri/CCC_analysis"
+
+#TH
+degs_analysis_interaction_scores_TH <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScore/degs_analysis_interaction_scores_08_05_2026_000945.txt"), check.names = FALSE)
+degs_analysis_means_TH <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScore/degs_analysis_means_08_05_2026_000945.txt"), check.names = FALSE)
+degs_analysis_significant_means_TH <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScore/degs_analysis_significant_means_08_05_2026_000945.txt"), check.names = FALSE)
+degs_analysis_relevant_interactions_TH <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScore/degs_analysis_relevant_interactions_08_05_2026_000945.txt"), check.names = FALSE)
+degs_analysis_deconvoluted_TH <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScore/degs_analysis_deconvoluted_08_05_2026_000945.txt"), check.names = FALSE)
+
+#SG
+degs_analysis_relevant_interactions_SG <- read.delim(file.path(CellPhoneDB_Output, "/SG_AIDA/CCC/results/SG_withScore/degs_analysis_relevant_interactions_08_05_2026_001916.txt"), check.names = FALSE)
+degs_analysis_interaction_scores_SG <- read.delim(file.path(CellPhoneDB_Output, "/SG_AIDA/CCC/results/SG_withScore/degs_analysis_interaction_scores_08_05_2026_001916.txt"), check.names = FALSE)
+degs_analysis_means_SG <- read.delim(file.path(CellPhoneDB_Output, "/SG_AIDA/CCC/results/SG_withScore/degs_analysis_means_08_05_2026_001916.txt"), check.names = FALSE)
+degs_analysis_deconvoluted_SG <- read.delim(file.path(CellPhoneDB_Output, "/SG_AIDA/CCC/results/SG_withScore/degs_analysis_deconvoluted_08_05_2026_001916.txt"), check.names = FALSE)
+
+#KR
+degs_analysis_interaction_scores_KR <- read.delim(file.path(CellPhoneDB_Output, "/KR_AIDA/CCC/results/KR_withScore/degs_analysis_interaction_scores_08_05_2026_003802.txt"), check.names = FALSE)
+degs_analysis_means_KR <- read.delim(file.path(CellPhoneDB_Output, "/KR_AIDA/CCC/results/KR_withScore/degs_analysis_means_08_05_2026_003802.txt"), check.names = FALSE)
+degs_analysis_relevant_interactions_KR <- read.delim(file.path(CellPhoneDB_Output, "/KR_AIDA/CCC/results/KR_withScore/degs_analysis_relevant_interactions_08_05_2026_003802.txt"), check.names = FALSE)
+degs_analysis_deconvoluted_KR <- read.delim(file.path(CellPhoneDB_Output, "/KR_AIDA/CCC/results/KR_withScore/degs_analysis_deconvoluted_08_05_2026_003802.txt"), check.names = FALSE)
+
+#JP
+degs_analysis_interaction_scores_JP <- read.delim(file.path(CellPhoneDB_Output, "/JP_AIDA/CCC/results/JP_withScore/degs_analysis_interaction_scores_08_05_2026_002550.txt"), check.names = FALSE)
+degs_analysis_means_JP <- read.delim(file.path(CellPhoneDB_Output, "/JP_AIDA/CCC/results/JP_withScore/degs_analysis_means_08_05_2026_002550.txt"), check.names = FALSE)
+degs_analysis_relevant_interactions_JP <- read.delim(file.path(CellPhoneDB_Output, "/JP_AIDA/CCC/results/JP_withScore/degs_analysis_relevant_interactions_08_05_2026_002550.txt"), check.names = FALSE)
+degs_analysis_deconvoluted_JP <- read.delim(file.path(CellPhoneDB_Output, "/JP_AIDA/CCC/results/JP_withScore/degs_analysis_deconvoluted_08_05_2026_002550.txt"), check.names = FALSE)
+```
+
+#Fig.4A
+#See only significant interaction by ancestry
+```{r fig.height=10, fig.width=8}
+degs_analysis_relevant_interactions_TH_plot <- plot_cpdb_heatmap(pvals = degs_analysis_relevant_interactions_TH, degs_analysis = TRUE, title = "Sum of significant interactions", legend_breaks = c(0, 1, 2), legend_labels = c("0", "1", "2"), low_col = "#656A59", mid_col = "#fec44f", high_col = "#d95f0e", symmetrical = FALSE)
+```
+
+```{r fig.height=5, fig.width=20}
+#TH
+TH_CD14mono_Blue_plot_cpdb <- plot_cpdb(
+    scdata = TH_adata_sce,
+    cell_type1 = "CD14+_Monocyte",
+    cell_type2 = ".",
+    means = degs_analysis_means_TH,
+    pvals = degs_analysis_relevant_interactions_TH,
+    celltype_key = "Author_Annotation",
+    genes = TH_UPdge_Blue_ref_All_celltypes_df_select$gene,
+    title = "Interactions between CD14+ Monocyte and other immune cell types from upregulated genes by Blue ancestry in the Thai populations",
+    max_size = 6,
+    degs_analysis = TRUE,
+    standard_scale = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_TH,
+    scale_alpha_by_interaction_scores = TRUE
+)
+
+#SG
+SG_CD14mono_Blue_plot_cpdb <- plot_cpdb(
+    scdata = SG_adata_sce,
+    cell_type1 = "CD14+_Monocyte",
+    cell_type2 = ".",
+    means = degs_analysis_means_SG,
+    pvals = degs_analysis_relevant_interactions_SG,
+    celltype_key = "Author_Annotation",
+    genes = SG_UPdge_Blue_ref_All_celltypes_df_select$gene,
+    title = "Interactions between CD14+ Monocyte and other immune cell types from upregulated genes by Blue ancestry in the SG populations",
+    max_size = 6,
+    degs_analysis = TRUE,
+    standard_scale = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_SG,
+    scale_alpha_by_interaction_scores = TRUE
+)
+
+#KR
+KR_CD14mono_Red_plot_cpdb <- plot_cpdb(
+    scdata = KR_adata_sce,
+    cell_type1 = "CD14+_Monocyte",
+    cell_type2 = ".",
+    means = degs_analysis_means_KR,
+    pvals = degs_analysis_relevant_interactions_KR,
+    celltype_key = "Author_Annotation",
+    genes = KR_UPdge_Red_ref_All_celltypes_df_select$gene,
+    title = "Interactions between CD14+ Monocyte and other immune cell types from upregulated genes by Red ancestry in the KR populations",
+    max_size = 6,
+    degs_analysis = TRUE,
+    standard_scale = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_KR,
+    scale_alpha_by_interaction_scores = TRUE
+)
+
+#JP
+JP_CD14mono_Red_plot_cpdb <- plot_cpdb(
+    scdata = JP_adata_sce,
+    cell_type1 = "CD14+_Monocyte",
+    cell_type2 = ".",
+    means = degs_analysis_means_JP,
+    pvals = degs_analysis_relevant_interactions_JP,
+    celltype_key = "Author_Annotation",
+    genes = JP_UPdge_Red_ref_All_celltypes_df_select$gene,
+    title = "Interactions between CD14+ Monocyte and other immune cell types from upregulated genes by Red ancestry in the JP populations",
+    max_size = 6,
+    degs_analysis = TRUE,
+    standard_scale = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_JP,
+    scale_alpha_by_interaction_scores = TRUE
+)
+```
+
+#Fig. 4B
+```{r fig.height=15, fig.width=15}
+TH_plot_cpdb4 <- plot_cpdb4(
+    scdata = TH_adata_sce,
+    interaction = c("HLA-F-LILRB1", "XCL1-XCR1", "PODXL2-SELL", "SELPLG-SELL", "CD34-SELL"),
+    cell_type1 = ".",
+    cell_type2 = ".",
+    celltype_key = "Author_Annotation",
+    means = degs_analysis_means_TH,
+    pvals = degs_analysis_relevant_interactions_TH,
+    deconvoluted = degs_analysis_deconvoluted_TH,
+    keep_significant_only = TRUE
+)
+TH_plot_cpdb4
+```
+
+#Fig. 4C
+```{r fig.height=4, fig.width=20}
+#Subset only interaction prominent by "Blue ancestry"
+TH_SG_UPdge_Blue <- c(TH_UPdge_Blue_ref_All_celltypes_df_select$gene, SG_UPdge_Blue_ref_All_celltypes_df_select$gene)
+Blue_Updge_interest <- c("LILRB1", "TNFRSF1B", "KLRC1")
+#TH
+TH_plot_cpdb <- plot_cpdb(
+    scdata = TH_adata_sce,
+    cell_type1 = "CD14+_Monocyte",
+    cell_type2 = ".",
+    means = degs_analysis_means_TH,
+    pvals = degs_analysis_relevant_interactions_TH,
+    celltype_key = "Author_Annotation",
+    genes = Blue_Updge_interest,
+    title = "Thai populations",
+    max_size = 6,
+    degs_analysis = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_TH,
+    scale_alpha_by_interaction_scores = TRUE,
+    keep_significant_only = FALSE,
+    standard_scale = T
+) +
+  theme(axis.text.y = element_text(size = 10))
+
+#SG
+SG_plot_cpdb <- plot_cpdb(
+    scdata = SG_adata_sce,
+    cell_type1 = "CD14+_Monocyte",
+    cell_type2 = ".",
+    means = degs_analysis_means_SG,
+    pvals = degs_analysis_relevant_interactions_SG,
+    celltype_key = "Author_Annotation",
+    genes = Blue_Updge_interest,
+    title = "SG populations",
+    max_size = 6,
+    degs_analysis = TRUE,
+    standard_scale = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_SG,
+    scale_alpha_by_interaction_scores = TRUE,
+    keep_significant_only = FALSE
+) +
+  theme(axis.text.y = element_text(size = 10))
+
+#KR
+KR_plot_cpdb <- plot_cpdb(
+    scdata = KR_adata_sce,
+    cell_type1 = "CD14+_Monocyte",
+    cell_type2 = ".",
+    means = degs_analysis_means_KR,
+    pvals = degs_analysis_relevant_interactions_KR,
+    celltype_key = "Author_Annotation",
+    genes = Blue_Updge_interest,
+    title = "KR populations",
+    max_size = 6,
+    degs_analysis = TRUE,
+    standard_scale = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_KR,
+    scale_alpha_by_interaction_scores = TRUE,
+    keep_significant_only = FALSE
+) +
+  theme(axis.text.y = element_text(size = 10))
+
+#JP
+JP_plot_cpdb <- plot_cpdb(
+    scdata = JP_adata_sce,
+    cell_type1 = "CD14+_Monocyte",
+    cell_type2 = ".",
+    means = degs_analysis_means_JP,
+    pvals = degs_analysis_relevant_interactions_JP,
+    celltype_key = "Author_Annotation",
+    genes = Blue_Updge_interest,
+    title = "JP populations",
+    max_size = 6,
+    degs_analysis = TRUE,
+    standard_scale = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_JP,
+    scale_alpha_by_interaction_scores = TRUE,
+    keep_significant_only = FALSE
+) +
+  theme(axis.text.y = element_text(size = 10))
+```
+
+#2. Sex 
+```{r}
+#TH
+degs_analysis_interaction_scores_TH_Sex <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScoreSex/degs_analysis_interaction_scores_08_05_2026_005345.txt"), check.names = FALSE)
+degs_analysis_means_TH_Sex <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScoreSex/degs_analysis_means_08_05_2026_005345.txt"), check.names = FALSE)
+degs_analysis_significant_means_TH_Sex <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScoreSex/degs_analysis_significant_means_08_05_2026_005345.txt"), check.names = FALSE)
+degs_analysis_relevant_interactions_TH_Sex <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScoreSex/degs_analysis_relevant_interactions_08_05_2026_005345.txt"), check.names = FALSE)
+degs_analysis_deconvoluted_TH_Sex <- read.delim(file.path(CellPhoneDB_Output, "/TH_AIDA/CCC/results/TH_withScoreSex/degs_analysis_deconvoluted_08_05_2026_005345.txt"), check.names = FALSE)
+
+#Read downregulated gene list in XY by Sex
+TH_AIDA_dge_SexMale_All_celltypes_0.5DOWN_df_select <- read.delim("/mnt/icbs_shared_storage_general_2022/Benjamaporn/Analysis2026/Analysis202606/CCC/TH_AIDA_dge_SexMale_All_celltypes_0.5DOWN_df_select.tsv")
+```
+
+```{r fig.height=4, fig.width=20}
+#TH
+TH_CD16mono_Sex_cpdb <- plot_cpdb(
+    scdata = TH_adata_sce,
+    cell_type1 = "CD16+_Monocyte",
+    cell_type2 = ".",
+    means = degs_analysis_means_TH_Sex,
+    pvals = degs_analysis_relevant_interactions_TH_Sex,
+    celltype_key = "Author_Annotation",
+    genes = TH_AIDA_dge_SexMale_All_celltypes_0.5DOWN_df_select$gene,
+    title = "Cell-cell communication between CD16+ monocyte and other cell types from upregulated genes in XX Thai individuals",
+    max_size = 6,
+    degs_analysis = TRUE,
+    standard_scale = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_TH_Sex,
+    scale_alpha_by_interaction_scores = TRUE
+)
+TH_CD16mono_Sex_cpdb
+
+TH_B_Sex_cpdb <- plot_cpdb(
+    scdata = TH_adata_sce,
+    cell_type1 = ".",
+    cell_type2 = "memory_B_IGHMhi|Plasma_Cell",
+    means = degs_analysis_means_TH_Sex,
+    pvals = degs_analysis_relevant_interactions_TH_Sex,
+    celltype_key = "Author_Annotation",
+    genes = TH_AIDA_dge_SexMale_All_celltypes_0.5DOWN_df_select$gene,
+    title = "Cell-cell communication between memory B and plasma cells and other cell types from upregulated genes in XX Thai individuals",
+    max_size = 6,
+    degs_analysis = TRUE,
+    standard_scale = TRUE,
+    interaction_scores = degs_analysis_interaction_scores_TH_Sex,
+    scale_alpha_by_interaction_scores = TRUE
+)
+TH_B_Sex_cpdb
+```
+
+#Save main and supplementary figures
+```{r}
+#Fig. 4A
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.4A_TH_plot_cpdb4.pdf", width = 10, height = 10)
+#Create a plot
+par(family = "Helvetica")
+degs_analysis_relevant_interactions_TH_plot
+dev.off()
+
+#Fig.4B
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.4B_TH_plot_cpdb4.pdf", width = 15, height = 15)
+#Create a plot
+par(family = "Helvetica")
+TH_plot_cpdb4
+dev.off()
+
+#Fig.4C
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.4C_TH_plot_cpdb.pdf", width = 20, height = 4)
+#Create a plot
+par(family = "Helvetica")
+TH_plot_cpdb
+dev.off()
+
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.4C_SG_plot_cpdb.pdf", width = 20, height = 4)
+#Create a plot
+par(family = "Helvetica")
+SG_plot_cpdb 
+dev.off()
+
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.4C_KR_plot_cpdb.pdf", width = 20, height = 4)
+#Create a plot
+par(family = "Helvetica")
+KR_plot_cpdb
+dev.off()
+
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.4C_JP_plot_cpdb.pdf", width = 18, height = 5.5)
+#Create a plot
+par(family = "Helvetica")
+JP_plot_cpdb + theme(legend.position = "bottom")
+dev.off()
+
+#Supplementary figures
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.S21A_TH_CD14mono_Blue_plot_cpdb.pdf", width = 20, height = 4)
+#Create a plot
+par(family = "Helvetica")
+TH_CD14mono_Blue_plot_cpdb
+dev.off
+
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.S21A_SG_CD14mono_Blue_plot_cpdb.pdf", width = 20, height = 5)
+#Create a plot
+par(family = "Helvetica")
+SG_CD14mono_Blue_plot_cpdb
+dev.off
+
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.S21B_KR_CD14mono_Red_plot_cpdb.pdf", width = 20, height = 5)
+#Create a plot
+par(family = "Helvetica")
+KR_CD14mono_Red_plot_cpdb
+dev.off()
+
+pdf("/home/benjamaporn.sri/CCC_analysis/Part4_CCC_AIDA_MS/Fig.S21B.JP_CD14mono_Red_plot_cpdb.pdf", width = 20, height = 3.5)
+#Create a plot
+par(family = "Helvetica")
+JP_CD14mono_Red_plot_cpdb
+dev.off()
+
+pdf("/home/benjamaporn.sri/CCC_analysis/Part5_CCC_AIDA_MS/Fig.S32.TH_CD16mono_Sex_cpdb.pdf", width = 20, height = 4)
+#Create a plot
+par(family = "Helvetica")
+TH_CD16mono_Sex_cpdb
+dev.off()
+
+pdf("/home/benjamaporn.sri/CCC_analysis/Part5_CCC_AIDA_MS/Fig.S33.TH_B_Sex_cpdb.pdf", width = 25, height = 4)
+#Create a plot
+par(family = "Helvetica")
+TH_B_Sex_cpdb
+dev.off()
+```
