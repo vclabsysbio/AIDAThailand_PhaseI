@@ -8,6 +8,7 @@ library(readxl)
 library(dplyr)
 library(stringr)
 library(openxlsx)
+library(genio)
 
 #Input
 chr6.dose <- read.table("/mnt/icbs_shared_storage_general_2022/Benjamaporn.sri/AIDA/HLA_2026/HLA/chr6.dose.raw", header=T)
